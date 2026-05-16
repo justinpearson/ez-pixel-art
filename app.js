@@ -19,8 +19,6 @@
   const MIN_ZOOM = 1, MAX_ZOOM = 64;
   let currentColor = [203, 110, 74, 255];   // rgba of #cb6e4aff
   let currentTool  = 'pencil';
-  let isDrawing    = false;
-  let lastPx       = null;
 
   const undoStack = [];
   const redoStack = [];
@@ -96,14 +94,7 @@
     };
   }
 
-  // ---------- Tools ----------
-  function setTool(name) {
-    currentTool = name;
-    $$('#tools .tool-btn').forEach(b =>
-      b.classList.toggle('active', b.dataset.tool === name));
-    artCanvas.style.cursor = (name === 'picker') ? 'crosshair' : 'cell';
-  }
-
+  // ---------- Tool helpers ----------
   // putImageData writes the exact RGBA we want; fillStyle+fillRect would
   // round-trip through pre-multiplied alpha and lose precision at mid alphas.
   const paintPixelBuf = artCtx.createImageData(1, 1);
@@ -156,6 +147,49 @@
     currentColor = [px[0], px[1], px[2], px[3]];
     syncColorUI();
     if (switchToPencil) setTool('pencil');
+  }
+
+  // ---------- Tool registry ----------
+  // Each tool owns its drag state and exposes pointer lifecycle hooks.
+  // The canvas event handlers in "Drawing events" delegate to tools[currentTool].
+  const tools = {
+    pencil: {
+      cursor: 'cell',
+      lastPx: null,
+      onDown(p) {
+        pushUndo();
+        this.lastPx = p;
+        paintPixel(p.x, p.y);
+      },
+      onMove(p) {
+        if (!this.lastPx) return;
+        if (this.lastPx.x === p.x && this.lastPx.y === p.y) return;
+        lineBresenham(this.lastPx.x, this.lastPx.y, p.x, p.y, paintPixel);
+        this.lastPx = p;
+      },
+      onUp()     { this.lastPx = null; },
+      onCancel() { this.lastPx = null; },
+    },
+    fill: {
+      cursor: 'cell',
+      onDown(p) {
+        pushUndo();
+        if (!floodFill(p.x, p.y)) undoStack.pop();
+      },
+    },
+    picker: {
+      cursor: 'crosshair',
+      onDown(p) { pickColor(p.x, p.y); },
+    },
+  };
+
+  function setTool(name) {
+    if (currentTool !== name) tools[currentTool]?.onDeactivate?.();
+    currentTool = name;
+    tools[name]?.onActivate?.();
+    $$('#tools .tool-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.tool === name));
+    artCanvas.style.cursor = tools[name]?.cursor ?? 'cell';
   }
 
   // ---------- Undo / redo ----------
@@ -392,38 +426,33 @@
   }
 
   // ---------- Drawing events ----------
+  // Thin dispatcher: pointer lifecycle is forwarded to the current tool.
+  // Right-click pick stays a global behaviour, not tool-routed.
+  let activeStroke = false;
   artCanvas.addEventListener('pointerdown', (e) => {
-    if (e.button === 2) return; // right click handled in contextmenu
     if (e.button !== 0) return;
     artCanvas.setPointerCapture(e.pointerId);
     const p = pointerToPixel(e);
     if (!inBounds(p.x, p.y)) return;
-
-    if (currentTool === 'picker') {
-      pickColor(p.x, p.y);
-      return;
-    }
-    pushUndo();
-    if (currentTool === 'fill') {
-      if (!floodFill(p.x, p.y)) undoStack.pop();
-      return;
-    }
-    isDrawing = true;
-    lastPx = p;
-    paintPixel(p.x, p.y);
+    activeStroke = true;
+    tools[currentTool].onDown?.(p, e);
   });
   artCanvas.addEventListener('pointermove', (e) => {
     const p = pointerToPixel(e);
     updateStatus(p);
-    if (!isDrawing) return;
-    if (lastPx && (lastPx.x !== p.x || lastPx.y !== p.y)) {
-      lineBresenham(lastPx.x, lastPx.y, p.x, p.y, paintPixel);
-      lastPx = p;
-    }
+    if (!activeStroke) return;
+    tools[currentTool].onMove?.(p, e);
   });
-  function endStroke() { isDrawing = false; lastPx = null; }
-  artCanvas.addEventListener('pointerup',     endStroke);
-  artCanvas.addEventListener('pointercancel', endStroke);
+  artCanvas.addEventListener('pointerup', (e) => {
+    if (!activeStroke) return;
+    activeStroke = false;
+    tools[currentTool].onUp?.(pointerToPixel(e), e);
+  });
+  artCanvas.addEventListener('pointercancel', () => {
+    if (!activeStroke) return;
+    activeStroke = false;
+    tools[currentTool].onCancel?.();
+  });
   artCanvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     const p = pointerToPixel(e);
@@ -615,6 +644,10 @@
       case 'e': eraseMode();       break;
       case 'f': setTool('fill');   break;
       case 'i': setTool('picker'); break;
+      case 'escape':
+        activeStroke = false;
+        tools[currentTool]?.onCancel?.();
+        break;
       case '=': case '+':
         zoom = Math.min(MAX_ZOOM, zoom + 1); applyZoom(); break;
       case '-': case '_':
