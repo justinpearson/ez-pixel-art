@@ -75,6 +75,11 @@ body { display: flex; flex-direction: column; }
   height: 24px;
   border-radius: 3px !important;
 }
+#current-color-info {
+  color: #666;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
 #palette {
   display: flex;
   flex-wrap: wrap;

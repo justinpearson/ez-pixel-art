@@ -285,7 +285,9 @@
     if (currentTool !== name) tools[currentTool]?.onDeactivate?.();
     currentTool = name;
     tools[name]?.onActivate?.();
-    $$('#tools .tool-btn').forEach(b =>
+    // .tool-btn lives in both #tools and #color-section (Pick was moved next
+    // to the palette per prompt-2 item 17), so the active toggle is global.
+    $$('.tool-btn').forEach(b =>
       b.classList.toggle('active', b.dataset.tool === name));
     artCanvas.style.cursor = tools[name]?.cursor ?? 'cell';
   }
@@ -478,6 +480,7 @@
     $('#alpha-number').value  = a;
     $('#current-color-preview').style.setProperty(
       '--swatch-color', `rgba(${r},${g},${b},${a/255})`);
+    $('#current-color-info').textContent = `rgba(${r}, ${g}, ${b}, ${a})`;
   }
   function setAlpha(a) {
     if (!Number.isFinite(a)) return;
@@ -520,7 +523,11 @@
   function updateStatus(p = lastPointerPx) {
     lastPointerPx = p;
     let s = `${imgW}×${imgH}  ·  zoom ${zoom}×`;
-    if (p && inBounds(p.x, p.y)) s += `  ·  (${p.x}, ${p.y})`;
+    if (p && inBounds(p.x, p.y)) {
+      s += `  ·  (${p.x}, ${p.y})`;
+      const [r, g, b, a] = artCtx.getImageData(p.x, p.y, 1, 1).data;
+      s += `  ·  rgba(${r}, ${g}, ${b}, ${a})`;
+    }
     $('#status').textContent = s;
   }
 
@@ -559,7 +566,7 @@
   });
 
   // ---------- Top bar wiring ----------
-  $$('#tools .tool-btn').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+  $$('.tool-btn').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
   $('#current-color').addEventListener('input', (e) => setColorFromHex(e.target.value));
   $('#alpha-slider').addEventListener('input', (e) => setAlpha(parseInt(e.target.value, 10)));
   $('#alpha-number').addEventListener('input', (e) => setAlpha(parseInt(e.target.value, 10)));
@@ -745,6 +752,7 @@
       case 'i': setTool('picker'); break;
       case 'r': setTool('rect');   break;
       case 'l': setTool('line');   break;
+      case 'u': undo();            break;
       case 'escape':
         activeStroke = false;
         tools[currentTool]?.onCancel?.();
