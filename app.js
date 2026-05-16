@@ -155,6 +155,15 @@
     const n = parseInt($('#shape-thickness').value, 10);
     return Math.max(1, Number.isFinite(n) ? n : 1);
   }
+  // Stamps a `size`×`size` square centred on (cx, cy). paintPixel handles
+  // out-of-bounds clipping so brushes near canvas edges just lose pixels.
+  function stamp(cx, cy, size) {
+    if (size <= 1) { paintPixel(cx, cy); return; }
+    const half = Math.floor(size / 2);
+    for (let dy = -half; dy <= size - 1 - half; dy++)
+      for (let dx = -half; dx <= size - 1 - half; dx++)
+        paintPixel(cx + dx, cy + dy);
+  }
   function drawRect(p0, p1, filled, thickness) {
     const minX = Math.min(p0.x, p1.x), maxX = Math.max(p0.x, p1.x);
     const minY = Math.min(p0.y, p1.y), maxY = Math.max(p0.y, p1.y);
@@ -178,16 +187,7 @@
     }
   }
   function drawLine(p0, p1, thickness) {
-    if (thickness <= 1) {
-      lineBresenham(p0.x, p0.y, p1.x, p1.y, paintPixel);
-      return;
-    }
-    const half = Math.floor(thickness / 2);
-    lineBresenham(p0.x, p0.y, p1.x, p1.y, (x, y) => {
-      for (let dy = -half; dy <= thickness - 1 - half; dy++)
-        for (let dx = -half; dx <= thickness - 1 - half; dx++)
-          paintPixel(x + dx, y + dy);
-    });
+    lineBresenham(p0.x, p0.y, p1.x, p1.y, (x, y) => stamp(x, y, thickness));
   }
 
   // ---------- Tool registry ----------
@@ -200,12 +200,13 @@
       onDown(p) {
         pushUndo();
         this.lastPx = p;
-        paintPixel(p.x, p.y);
+        stamp(p.x, p.y, getThickness());
       },
       onMove(p) {
         if (!this.lastPx) return;
         if (this.lastPx.x === p.x && this.lastPx.y === p.y) return;
-        lineBresenham(this.lastPx.x, this.lastPx.y, p.x, p.y, paintPixel);
+        const size = getThickness();
+        lineBresenham(this.lastPx.x, this.lastPx.y, p.x, p.y, (x, y) => stamp(x, y, size));
         this.lastPx = p;
       },
       onUp()     { this.lastPx = null; },
