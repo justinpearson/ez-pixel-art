@@ -14,7 +14,15 @@ For a quick check, open `index.html` directly (`open index.html` on macOS). For 
 python3 -m http.server 8000
 ```
 
-then open `http://localhost:8000/`. The `.claude/launch.json` config "ez-pixel-art (static, python http.server)" wires this up for the preview tool. All state lives in memory; reloading the page discards the canvas. There is no automated test suite — verify changes by exercising each tool in the browser (pencil, eraser, fill, picker, undo/redo, resize, crop, open, save in each of PNG/JPG/BMP).
+then open `http://localhost:8000/`. The `.claude/launch.json` config "ez-pixel-art (static, python http.server)" wires this up for the preview tool. All state lives in memory; reloading the page discards the canvas.
+
+## Regression tests
+
+A pure-browser harness at `tests/index.html` loads the app in an iframe and runs scenario scripts against it. Open `http://localhost:8000/tests/` (or `open tests/index.html`) — it auto-runs on load and renders a pass/fail table with per-scenario canvas snapshots. Scenarios live in `tests/scenarios.js` as plain data (`{ label, description, chain?, run, assertions }`); add a new scenario by appending to that array — no harness changes needed. The `App` class in `tests/runner.js` is the seam for user actions (`click`, `drag`, `setAlpha`, `pressUndo`, etc.).
+
+If you change `app.js` and the tests don't seem to reflect it, hard-reload the tests page (Cmd-Shift-R) — the iframe's HTML is cache-busted on each scenario but child scripts may still come from cache.
+
+For manual smoke testing outside the harness, exercise each tool in the browser (pencil, eraser, fill, picker, undo/redo, resize, crop, open, save in each of PNG/JPG/BMP).
 
 ## Architecture
 

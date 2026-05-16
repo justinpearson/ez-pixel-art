@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ez-pixel-art — regression tests</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 13px/1.5 -apple-system, system-ui, sans-serif;
+    background: #fafafa;
+    color: #1a1a1a;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 16px;
+    background: #fff;
+    border-bottom: 1px solid #ddd;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  header h1 { margin: 0; font-size: 15px; flex: 1; }
+  #summary {
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    background: #eee;
+    color: #555;
+  }
+  #summary.running { background: #fff8d4; color: #8a6800; }
+  #summary.pass    { background: #d4f4dd; color: #1e7e34; }
+  #summary.fail    { background: #fcd6d6; color: #b30000; }
+  #run {
+    padding: 4px 12px;
+    border: 1px solid #bbb;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+    font: inherit;
+  }
+  #run:hover { background: #eef; }
+
+  .frame-wrap {
+    width: 95%;
+    max-width: 1000px;
+    margin: 12px auto;
+  }
+  #app {
+    display: block;
+    width: 100%;
+    height: 560px;
+    border: 1px solid #ccc;
+    background: #fff;
+  }
+  .frame-note {
+    color: #888;
+    font-size: 12px;
+    margin: 4px 0 0;
+  }
+
+  #results {
+    width: 95%;
+    max-width: 1100px;
+    margin: 8px auto 40px;
+    border-collapse: collapse;
+    background: #fff;
+    border: 1px solid #eee;
+  }
+  #results th, #results td {
+    text-align: left;
+    vertical-align: top;
+    padding: 8px 10px;
+    border-bottom: 1px solid #eee;
+  }
+  #results th {
+    background: #f4f4f4;
+    font-weight: 600;
+    font-size: 12px;
+    color: #555;
+  }
+  #results tr.fail td { background: #fff5f5; }
+
+  .label { font-weight: 600; font-size: 13px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .desc  { font-size: 12px; color: #666; margin-top: 2px; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+  }
+  .badge-pass { background: #1e7e34; color: #fff; }
+  .badge-fail { background: #c0392b; color: #fff; }
+  .assert-summary { font-size: 12px; color: #666; }
+  .failure {
+    font-size: 12.5px;
+    color: #c0392b;
+    margin-top: 4px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .failure code {
+    background: #fff;
+    padding: 1px 4px;
+    border: 1px solid #f0c0c0;
+    border-radius: 3px;
+    word-break: break-word;
+  }
+  .error {
+    color: #c0392b;
+    font: 12px ui-monospace, "SF Mono", Menlo, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .canvas-thumb {
+    width: 96px;
+    height: 96px;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    border: 1px solid #ddd;
+    background:
+      linear-gradient(45deg, #ccc 25%, transparent 25%),
+      linear-gradient(-45deg, #ccc 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #ccc 75%),
+      linear-gradient(-45deg, transparent 75%, #ccc 75%);
+    background-size: 12px 12px;
+    background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+    background-color: #f0f0f0;
+    display: block;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>ez-pixel-art — regression tests</h1>
+  <span id="summary">Initialising…</span>
+  <button id="run">Re-run</button>
+</header>
+
+<div class="frame-wrap">
+  <iframe id="app" title="app under test"></iframe>
+  <p class="frame-note">App under test (iframe loads <code>../index.html</code>). Reloaded between independent scenarios.</p>
+</div>
+
+<table id="results">
+  <thead>
+    <tr>
+      <th style="width:36px">#</th>
+      <th>Scenario</th>
+      <th style="width:64px">Result</th>
+      <th>Assertions</th>
+      <th style="width:120px">Canvas</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script src="scenarios.js"></script>
+<script src="runner.js"></script>
+</body>
+</html>
