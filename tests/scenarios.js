@@ -598,5 +598,94 @@
         ['after undo (cleared)',  ctx.after,  TRANSPARENT],
       ],
     },
+
+    // ===== prompt-2 item 13: Cursor click-preview (pencil-only first pass, TDD) =====
+
+    {
+      label: '40-pencil-hover-preview',
+      description: 'Pencil hover at (10,10) — overlay shows a preview pixel; #art is unchanged.',
+      run: async (app) => {
+        app.setThickness(1);
+        app.pointerMove(10, 10);
+      },
+      assertions: (app) => [
+        ['#art (10,10) untouched',           app.pix(10, 10),         TRANSPARENT],
+        ['overlay (10,10) shows preview',    app.overlayPix(10, 10),  ORANGE],
+        ['overlay (5,5) clean',              app.overlayPix(5, 5),    TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '41-pencil-hover-thickness-3',
+      description: 'Pencil hover at thickness=3 → 3×3 preview stamp on the overlay.',
+      run: async (app) => {
+        app.setThickness(3);
+        app.pointerMove(10, 10);
+      },
+      assertions: (app) => [
+        ['overlay centre (10,10)',     app.overlayPix(10, 10),  ORANGE],
+        ['overlay NW (9,9)',           app.overlayPix(9, 9),    ORANGE],
+        ['overlay SE (11,11)',         app.overlayPix(11, 11),  ORANGE],
+        ['overlay outside (8,10)',     app.overlayPix(8, 10),   TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '42-pencil-hover-moves',
+      description: 'Moving the cursor clears the old preview and re-paints at the new spot.',
+      run: async (app) => {
+        app.setThickness(1);
+        app.pointerMove(10, 10);
+        app.pointerMove(15, 15);
+      },
+      assertions: (app) => [
+        ['old position cleared', app.overlayPix(10, 10), TRANSPARENT],
+        ['new position painted', app.overlayPix(15, 15), ORANGE],
+      ],
+    },
+
+    {
+      label: '43-pencil-hover-eraser-marker',
+      description: 'In Erase mode (α=0), the hover preview is a contrasting opaque marker, not transparent (otherwise the user couldn\'t see where they\'d erase).',
+      run: async (app) => {
+        app.pressErase();
+        app.setThickness(1);
+        app.pointerMove(10, 10);
+      },
+      assertions: (app) => [
+        ['marker has visible alpha',  app.overlayPix(10, 10)[3] > 0,   true],
+      ],
+    },
+
+    {
+      label: '44-non-pencil-no-hover-preview',
+      description: 'Rect tool hover: no preview pixel on overlay (only pencil/erase show hover preview in this pass).',
+      run: async (app) => {
+        app.q('[data-tool="rect"]').click();
+        app.pointerMove(10, 10);
+      },
+      assertions: (app) => [
+        ['overlay (10,10) clean', app.overlayPix(10, 10), TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '45-hover-leaves-art-unchanged',
+      description: 'Many hovers don\'t mutate #art; only the actual click commits.',
+      run: async (app) => {
+        app.setThickness(1);
+        app.pointerMove(5, 5);
+        app.pointerMove(8, 8);
+        app.pointerMove(10, 10);
+        const beforeClick = app.pix(10, 10);
+        app.click(10, 10);
+        const afterClick = app.pix(10, 10);
+        return { beforeClick, afterClick };
+      },
+      assertions: (_app, ctx) => [
+        ['before click: #art transparent', ctx.beforeClick, TRANSPARENT],
+        ['after click: #art painted',      ctx.afterClick,  ORANGE],
+      ],
+    },
   ];
 })();
