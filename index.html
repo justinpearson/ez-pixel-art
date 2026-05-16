@@ -26,6 +26,13 @@
       <button class="tool-btn active" data-tool="pencil" title="Pencil (P)">Pencil</button>
       <button class="tool-btn" data-tool="fill"   title="Fill (F)">Fill</button>
       <button class="tool-btn" data-tool="picker" title="Eyedropper (I) — right-click also picks">Pick</button>
+      <button class="tool-btn" data-tool="rect"   title="Rectangle (R) — drag to draw; Esc to cancel">Rect</button>
+      <button class="tool-btn" data-tool="line"   title="Line (L) — drag to draw; Esc to cancel">Line</button>
+    </div>
+
+    <div class="group" id="shape-options">
+      <label>Thickness <input type="number" id="shape-thickness" min="1" max="16" value="1" /></label>
+      <label class="check"><input type="checkbox" id="rect-filled" /> Filled</label>
     </div>
 
     <div class="group">

@@ -149,6 +149,47 @@
     if (switchToPencil) setTool('pencil');
   }
 
+  // ---------- Shape helpers ----------
+  function getFilled()    { return $('#rect-filled').checked; }
+  function getThickness() {
+    const n = parseInt($('#shape-thickness').value, 10);
+    return Math.max(1, Number.isFinite(n) ? n : 1);
+  }
+  function drawRect(p0, p1, filled, thickness) {
+    const minX = Math.min(p0.x, p1.x), maxX = Math.max(p0.x, p1.x);
+    const minY = Math.min(p0.y, p1.y), maxY = Math.max(p0.y, p1.y);
+    if (filled) {
+      for (let y = minY; y <= maxY; y++)
+        for (let x = minX; x <= maxX; x++)
+          paintPixel(x, y);
+      return;
+    }
+    const t = Math.max(1, Math.min(
+      thickness,
+      Math.floor((maxX - minX + 2) / 2),
+      Math.floor((maxY - minY + 2) / 2),
+    ));
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        if (x - minX < t || maxX - x < t || y - minY < t || maxY - y < t) {
+          paintPixel(x, y);
+        }
+      }
+    }
+  }
+  function drawLine(p0, p1, thickness) {
+    if (thickness <= 1) {
+      lineBresenham(p0.x, p0.y, p1.x, p1.y, paintPixel);
+      return;
+    }
+    const half = Math.floor(thickness / 2);
+    lineBresenham(p0.x, p0.y, p1.x, p1.y, (x, y) => {
+      for (let dy = -half; dy <= thickness - 1 - half; dy++)
+        for (let dx = -half; dx <= thickness - 1 - half; dx++)
+          paintPixel(x + dx, y + dy);
+    });
+  }
+
   // ---------- Tool registry ----------
   // Each tool owns its drag state and exposes pointer lifecycle hooks.
   // The canvas event handlers in "Drawing events" delegate to tools[currentTool].
@@ -181,6 +222,62 @@
       cursor: 'crosshair',
       onDown(p) { pickColor(p.x, p.y); },
     },
+    rect: {
+      cursor: 'crosshair',
+      start: null,
+      before: null,
+      onDown(p) {
+        this.start = p;
+        this.before = snapshot();
+      },
+      onMove(p) {
+        if (!this.start) return;
+        artCtx.putImageData(this.before, 0, 0);
+        drawRect(this.start, p, getFilled(), getThickness());
+      },
+      onUp(p) {
+        if (!this.start) return;
+        artCtx.putImageData(this.before, 0, 0);
+        drawRect(this.start, p, getFilled(), getThickness());
+        pushUndoSnap(this.before);
+        this.start = null;
+        this.before = null;
+      },
+      onCancel() {
+        if (!this.start) return;
+        artCtx.putImageData(this.before, 0, 0);
+        this.start = null;
+        this.before = null;
+      },
+    },
+    line: {
+      cursor: 'crosshair',
+      start: null,
+      before: null,
+      onDown(p) {
+        this.start = p;
+        this.before = snapshot();
+      },
+      onMove(p) {
+        if (!this.start) return;
+        artCtx.putImageData(this.before, 0, 0);
+        drawLine(this.start, p, getThickness());
+      },
+      onUp(p) {
+        if (!this.start) return;
+        artCtx.putImageData(this.before, 0, 0);
+        drawLine(this.start, p, getThickness());
+        pushUndoSnap(this.before);
+        this.start = null;
+        this.before = null;
+      },
+      onCancel() {
+        if (!this.start) return;
+        artCtx.putImageData(this.before, 0, 0);
+        this.start = null;
+        this.before = null;
+      },
+    },
   };
 
   function setTool(name) {
@@ -199,11 +296,12 @@
     artCtx.putImageData(snap, 0, 0);
     if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
   }
-  function pushUndo() {
-    undoStack.push(snapshot());
+  function pushUndoSnap(snap) {
+    undoStack.push(snap);
     if (undoStack.length > MAX_UNDO) undoStack.shift();
     redoStack.length = 0;
   }
+  function pushUndo() { pushUndoSnap(snapshot()); }
   function undo() {
     if (!undoStack.length) return;
     redoStack.push(snapshot());
@@ -644,6 +742,8 @@
       case 'e': eraseMode();       break;
       case 'f': setTool('fill');   break;
       case 'i': setTool('picker'); break;
+      case 'r': setTool('rect');   break;
+      case 'l': setTool('line');   break;
       case 'escape':
         activeStroke = false;
         tools[currentTool]?.onCancel?.();
