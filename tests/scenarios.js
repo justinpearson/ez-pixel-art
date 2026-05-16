@@ -435,5 +435,91 @@
         ['after redo',  ctx.redone,  ORANGE],
       ],
     },
+
+    // ===== prompt-2 item 11: Adjustable pencil size (TDD) =====
+
+    {
+      label: '29-pencil-size-1-default',
+      description: 'Pencil at thickness=1 — single pixel at click point (regression: prior behaviour preserved).',
+      run: async (app) => {
+        app.setThickness(1);
+        app.click(15, 15);
+      },
+      assertions: (app) => [
+        ['(15,15) painted',  app.pix(15, 15), ORANGE],
+        ['(14,15) clear',    app.pix(14, 15), TRANSPARENT],
+        ['(16,15) clear',    app.pix(16, 15), TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '30-pencil-size-3-single-click',
+      description: 'Pencil at thickness=3, single click at (10,10) → 3×3 block centred on (10,10).',
+      run: async (app) => {
+        app.setThickness(3);
+        app.click(10, 10);
+      },
+      assertions: (app) => [
+        ['centre (10,10)',         app.pix(10, 10), ORANGE],
+        ['NW (9,9)',               app.pix(9, 9),   ORANGE],
+        ['NE (11,9)',              app.pix(11, 9),  ORANGE],
+        ['SW (9,11)',              app.pix(9, 11),  ORANGE],
+        ['SE (11,11)',             app.pix(11, 11), ORANGE],
+        ['outside W (8,10)',       app.pix(8, 10),  TRANSPARENT],
+        ['outside E (12,10)',      app.pix(12, 10), TRANSPARENT],
+        ['outside N (10,8)',       app.pix(10, 8),  TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '31-pencil-size-5-stroke',
+      description: 'Pencil at thickness=5, drag (8,8) → (16,8) → 5-pixel-wide band centred on row 8.',
+      run: async (app) => {
+        app.setThickness(5);
+        app.drag(8, 8, 16, 8);
+      },
+      assertions: (app) => [
+        ['centre (12,8)',          app.pix(12, 8),  ORANGE],
+        ['two above (12,6)',       app.pix(12, 6),  ORANGE],
+        ['two below (12,10)',      app.pix(12, 10), ORANGE],
+        ['three above (12,5)',     app.pix(12, 5),  TRANSPARENT],
+        ['three below (12,11)',    app.pix(12, 11), TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '32-pencil-clipped-at-edge',
+      description: 'Pencil at thickness=3 stamped near (0,0) — only in-bounds pixels paint; no error.',
+      run: async (app) => {
+        app.setThickness(3);
+        app.click(0, 0);
+      },
+      assertions: (app) => [
+        ['(0,0) painted',  app.pix(0, 0),  ORANGE],
+        ['(1,0) painted',  app.pix(1, 0),  ORANGE],
+        ['(0,1) painted',  app.pix(0, 1),  ORANGE],
+        ['(1,1) painted',  app.pix(1, 1),  ORANGE],
+        ['(2,0) clear',    app.pix(2, 0),  TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '33-eraser-thick',
+      description: 'Pencil at α=0 (Erase) with thickness=3 clears a 3×3 region from a filled canvas.',
+      run: async (app) => {
+        app.q('[data-tool="fill"]').click();
+        app.click(10, 10);                  // fill the whole canvas
+        app.q('[data-tool="pencil"]').click();
+        app.pressErase();                   // α=0, tool=pencil
+        app.setThickness(3);
+        app.click(15, 15);
+      },
+      assertions: (app) => [
+        ['centre (15,15) cleared',      app.pix(15, 15), TRANSPARENT],
+        ['NW (14,14) cleared',          app.pix(14, 14), TRANSPARENT],
+        ['SE (16,16) cleared',          app.pix(16, 16), TRANSPARENT],
+        ['outside (12,15) still filled', app.pix(12, 15), ORANGE],
+      ],
+    },
   ];
 })();
