@@ -41,14 +41,18 @@
       });
     }
 
+    pointerDown(x, y) { this.canvas.dispatchEvent(this._pointer('pointerdown', x, y)); }
+    pointerMove(x, y) { this.canvas.dispatchEvent(this._pointer('pointermove', x, y)); }
+    pointerUp(x, y)   { this.canvas.dispatchEvent(this._pointer('pointerup',   x, y)); }
+
     click(x, y) {
-      this.canvas.dispatchEvent(this._pointer('pointerdown', x, y));
-      this.canvas.dispatchEvent(this._pointer('pointerup',   x, y));
+      this.pointerDown(x, y);
+      this.pointerUp(x, y);
     }
     drag(x0, y0, x1, y1) {
-      this.canvas.dispatchEvent(this._pointer('pointerdown', x0, y0));
-      this.canvas.dispatchEvent(this._pointer('pointermove', x1, y1));
-      this.canvas.dispatchEvent(this._pointer('pointerup',   x1, y1));
+      this.pointerDown(x0, y0);
+      this.pointerMove(x1, y1);
+      this.pointerUp(x1, y1);
     }
     rightClick(x, y) {
       const { clientX, clientY } = this._coords(x, y);
@@ -61,6 +65,16 @@
       const s = this.q('#alpha-slider');
       s.value = String(v);
       s.dispatchEvent(new this.win.Event('input', { bubbles: true }));
+    }
+    setThickness(n) {
+      const t = this.q('#shape-thickness');
+      t.value = String(n);
+      t.dispatchEvent(new this.win.Event('input', { bubbles: true }));
+    }
+    setFilled(b) {
+      const f = this.q('#rect-filled');
+      f.checked = !!b;
+      f.dispatchEvent(new this.win.Event('change', { bubbles: true }));
     }
     pickSwatch(idx) {
       this.qa('#palette .swatch:not(.add-swatch)')[idx].click();

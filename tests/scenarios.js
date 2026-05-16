@@ -208,5 +208,232 @@
         ['tool still pencil',    app.q('#tools .tool-btn.active').dataset.tool,  'pencil'],
       ],
     },
+
+    // ===== prompt-2 item 21: Rectangle + Line tools (TDD) =====
+
+    {
+      label: '16-rect-tool-button',
+      description: 'Rect tool button exists; clicking switches tool to rect and sets cursor=crosshair.',
+      run: async (app) => { app.q('[data-tool="rect"]').click(); },
+      assertions: (app) => [
+        ['active tool', app.q('#tools .tool-btn.active').dataset.tool, 'rect'],
+        ['cursor',      app.canvas.style.cursor,                       'crosshair'],
+      ],
+    },
+
+    {
+      label: '17-line-tool-button',
+      description: 'Line tool button exists; clicking switches tool to line and sets cursor=crosshair.',
+      run: async (app) => { app.q('[data-tool="line"]').click(); },
+      assertions: (app) => [
+        ['active tool', app.q('#tools .tool-btn.active').dataset.tool, 'line'],
+        ['cursor',      app.canvas.style.cursor,                       'crosshair'],
+      ],
+    },
+
+    {
+      label: '18-keyboard-r-l',
+      description: 'Keyboard R selects rect; L selects line.',
+      run: async (app) => {
+        app.keyboard('r');
+        const afterR = app.q('#tools .tool-btn.active').dataset.tool;
+        app.keyboard('l');
+        const afterL = app.q('#tools .tool-btn.active').dataset.tool;
+        return { afterR, afterL };
+      },
+      assertions: (_app, ctx) => [
+        ['after R', ctx.afterR, 'rect'],
+        ['after L', ctx.afterL, 'line'],
+      ],
+    },
+
+    {
+      label: '19-rect-filled',
+      description: 'Drag (4,4) → (8,8) with Filled checked → 25-pixel solid block; neighbours untouched.',
+      run: async (app) => {
+        app.q('[data-tool="rect"]').click();
+        app.setFilled(true);
+        app.setThickness(1);
+        app.drag(4, 4, 8, 8);
+      },
+      assertions: (app) => [
+        ['corner (4,4)',      app.pix(4, 4),  ORANGE],
+        ['interior (6,6)',    app.pix(6, 6),  ORANGE],
+        ['corner (8,8)',      app.pix(8, 8),  ORANGE],
+        ['outside (3,3)',     app.pix(3, 3),  TRANSPARENT],
+        ['outside (9,9)',     app.pix(9, 9),  TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '20-rect-outline-thickness-1',
+      description: 'Drag (4,4) → (8,8) outline thickness=1 → border painted, interior transparent.',
+      run: async (app) => {
+        app.q('[data-tool="rect"]').click();
+        app.setFilled(false);
+        app.setThickness(1);
+        app.drag(4, 4, 8, 8);
+      },
+      assertions: (app) => [
+        ['top-left (4,4)',           app.pix(4, 4),   ORANGE],
+        ['top-right (8,4)',          app.pix(8, 4),   ORANGE],
+        ['bottom-left (4,8)',        app.pix(4, 8),   ORANGE],
+        ['bottom-right (8,8)',       app.pix(8, 8),   ORANGE],
+        ['mid-top (6,4)',            app.pix(6, 4),   ORANGE],
+        ['mid-right (8,6)',          app.pix(8, 6),   ORANGE],
+        ['interior (5,5) clear',     app.pix(5, 5),   TRANSPARENT],
+        ['interior (6,6) clear',     app.pix(6, 6),   TRANSPARENT],
+        ['interior (7,7) clear',     app.pix(7, 7),   TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '21-rect-outline-thickness-2',
+      description: 'Outline thickness=2 on a 5×5 rect → 2-pixel border; only (6,6) interior is clear.',
+      run: async (app) => {
+        app.q('[data-tool="rect"]').click();
+        app.setFilled(false);
+        app.setThickness(2);
+        app.drag(4, 4, 8, 8);
+      },
+      assertions: (app) => [
+        ['outer (4,4)',              app.pix(4, 4),   ORANGE],
+        ['inner-border (5,5)',       app.pix(5, 5),   ORANGE],
+        ['outer (8,8)',              app.pix(8, 8),   ORANGE],
+        ['inner-border (5,7)',       app.pix(5, 7),   ORANGE],
+        ['only interior (6,6)',      app.pix(6, 6),   TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '22-rect-preview-during-drag',
+      description: 'During drag the preview shows; extending changes the preview; release commits the final shape.',
+      run: async (app) => {
+        app.q('[data-tool="rect"]').click();
+        app.setFilled(true);
+        app.setThickness(1);
+        app.pointerDown(4, 4);
+        app.pointerMove(6, 6);
+        const midDrag = { p55: app.pix(5, 5), p77: app.pix(7, 7) };
+        app.pointerMove(8, 8);
+        const extended = { p55: app.pix(5, 5), p77: app.pix(7, 7) };
+        app.pointerUp(8, 8);
+        const committed = { p77: app.pix(7, 7), p88: app.pix(8, 8) };
+        return { midDrag, extended, committed };
+      },
+      assertions: (_app, ctx) => [
+        ['mid-drag (5,5) painted',         ctx.midDrag.p55,    ORANGE],
+        ['mid-drag (7,7) NOT yet painted', ctx.midDrag.p77,    TRANSPARENT],
+        ['extended (5,5) still painted',   ctx.extended.p55,   ORANGE],
+        ['extended (7,7) now painted',     ctx.extended.p77,   ORANGE],
+        ['committed (7,7) preserved',      ctx.committed.p77,  ORANGE],
+        ['committed (8,8) painted',        ctx.committed.p88,  ORANGE],
+      ],
+    },
+
+    {
+      label: '23-rect-esc-cancel',
+      description: 'Esc mid-drag restores canvas; pointerup commits nothing.',
+      run: async (app) => {
+        app.q('[data-tool="rect"]').click();
+        app.setFilled(true);
+        app.pointerDown(4, 4);
+        app.pointerMove(8, 8);
+        app.keyboard('Escape');
+        app.pointerUp(8, 8);
+      },
+      assertions: (app) => [
+        ['(5,5) clear', app.pix(5, 5), TRANSPARENT],
+        ['(8,8) clear', app.pix(8, 8), TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '24-line-horizontal',
+      description: 'Drag (4,4) → (10,4) thickness=1 → 7 pixels along row 4.',
+      run: async (app) => {
+        app.q('[data-tool="line"]').click();
+        app.setThickness(1);
+        app.drag(4, 4, 10, 4);
+      },
+      assertions: (app) => [
+        ['start (4,4)',         app.pix(4, 4),   ORANGE],
+        ['mid (7,4)',           app.pix(7, 4),   ORANGE],
+        ['end (10,4)',          app.pix(10, 4),  ORANGE],
+        ['off-line (4,5)',      app.pix(4, 5),   TRANSPARENT],
+        ['off-line (10,5)',     app.pix(10, 5),  TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '25-line-diagonal',
+      description: 'Drag (4,4) → (10,10) → Bresenham diagonal.',
+      run: async (app) => {
+        app.q('[data-tool="line"]').click();
+        app.setThickness(1);
+        app.drag(4, 4, 10, 10);
+      },
+      assertions: (app) => [
+        ['(4,4)',               app.pix(4, 4),   ORANGE],
+        ['(7,7)',               app.pix(7, 7),   ORANGE],
+        ['(10,10)',             app.pix(10, 10), ORANGE],
+        ['off-diagonal (4,5)',  app.pix(4, 5),   TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '26-line-thick',
+      description: 'Horizontal drag at thickness=3 → 3-pixel-wide band centred on row 4.',
+      run: async (app) => {
+        app.q('[data-tool="line"]').click();
+        app.setThickness(3);
+        app.drag(4, 4, 10, 4);
+      },
+      assertions: (app) => [
+        ['centre (7,4)',        app.pix(7, 4),   ORANGE],
+        ['above (7,3)',         app.pix(7, 3),   ORANGE],
+        ['below (7,5)',         app.pix(7, 5),   ORANGE],
+        ['two-below (7,6)',     app.pix(7, 6),   TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '27-line-esc-cancel',
+      description: 'Esc mid-drag for line tool — canvas unchanged.',
+      run: async (app) => {
+        app.q('[data-tool="line"]').click();
+        app.setThickness(1);
+        app.pointerDown(4, 4);
+        app.pointerMove(10, 10);
+        app.keyboard('Escape');
+        app.pointerUp(10, 10);
+      },
+      assertions: (app) => [
+        ['(4,4) clear', app.pix(4, 4),   TRANSPARENT],
+        ['(7,7) clear', app.pix(7, 7),   TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '28-rect-undo-redo',
+      description: 'Filled rect → undo restores empty canvas → redo brings rect back.',
+      run: async (app) => {
+        app.q('[data-tool="rect"]').click();
+        app.setFilled(true);
+        app.setThickness(1);
+        app.drag(4, 4, 8, 8);
+        const drawn = app.pix(6, 6);
+        app.pressUndo();
+        const undone = app.pix(6, 6);
+        app.pressRedo();
+        const redone = app.pix(6, 6);
+        return { drawn, undone, redone };
+      },
+      assertions: (_app, ctx) => [
+        ['after draw',  ctx.drawn,   ORANGE],
+        ['after undo',  ctx.undone,  TRANSPARENT],
+        ['after redo',  ctx.redone,  ORANGE],
+      ],
+    },
   ];
 })();
