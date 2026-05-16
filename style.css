@@ -1,0 +1,180 @@
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  height: 100%;
+  font: 13px system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #222;
+  background: #f0f0f0;
+  user-select: none;
+}
+body { display: flex; flex-direction: column; }
+
+/* ---------- Toolbar ---------- */
+#toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 8px 12px;
+  background: #fafafa;
+  border-bottom: 1px solid #ddd;
+  flex-shrink: 0;
+}
+.brand { font-weight: 600; font-size: 15px; margin-right: 4px; }
+#toolbar .group { display: flex; align-items: center; gap: 4px; }
+#toolbar button,
+#toolbar select {
+  padding: 4px 9px;
+  font: inherit;
+  background: #fff;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#toolbar button:hover { background: #eef; }
+#toolbar button:active { background: #dde; }
+#toolbar .tool-btn.active {
+  background: #d6e6ff;
+  border-color: #4a8dff;
+}
+#toolbar .check {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  cursor: pointer;
+}
+#zoom-label {
+  min-width: 36px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+#current-color {
+  width: 34px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #888;
+  border-radius: 4px;
+  cursor: pointer;
+  background: none;
+}
+#palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 220px;
+}
+.swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0 !important;
+  border: 1px solid #888 !important;
+  border-radius: 2px !important;
+  cursor: pointer;
+}
+.add-swatch {
+  background: #f5f5f5 !important;
+  color: #888;
+  font-weight: 600;
+  line-height: 1;
+}
+#status {
+  margin-left: auto;
+  color: #666;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Canvas area ---------- */
+main { flex: 1; min-height: 0; }
+#canvas-wrap {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background: #2c2f33;
+  display: flex;
+}
+#canvas-stage {
+  position: relative;
+  margin: auto;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px #444, 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.checker {
+  background-color: #e6e6e6;
+  background-image:
+    linear-gradient(45deg, #b8b8b8 25%, transparent 25%),
+    linear-gradient(-45deg, #b8b8b8 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #b8b8b8 75%),
+    linear-gradient(-45deg, transparent 75%, #b8b8b8 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+#art {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  cursor: cell;
+}
+#grid-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right,  rgba(0, 0, 0, 0.28) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.28) 1px, transparent 1px);
+  background-size: var(--cell, 16px) var(--cell, 16px);
+}
+.hidden { display: none !important; }
+
+/* ---------- Dialogs ---------- */
+dialog {
+  border: 1px solid #888;
+  border-radius: 6px;
+  padding: 16px 18px;
+  min-width: 280px;
+  background: #fff;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
+dialog h3 { margin: 0 0 12px 0; }
+dialog label { display: block; margin: 6px 0; }
+dialog input[type="number"] { width: 84px; padding: 2px 4px; }
+dialog .actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+dialog button {
+  padding: 4px 12px;
+  font: inherit;
+  border: 1px solid #bbb;
+  background: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+}
+dialog button[value="ok"] {
+  background: #4a8dff;
+  color: #fff;
+  border-color: #2a6de0;
+}
+
+.import-body { display: flex; gap: 16px; align-items: flex-start; }
+.preview-wrap {
+  position: relative;
+  width: 320px;
+  height: 320px;
+  background: #eee;
+  border: 1px solid #ccc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+#import-preview-img,
+#import-preview-grid {
+  position: absolute;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+.import-controls { min-width: 200px; }
+.hint { color: #777; font-size: 12px; margin: 8px 0 0 0; }

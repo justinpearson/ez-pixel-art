@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ez-pixel-art</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header id="toolbar">
+    <span class="brand">ez-pixel-art</span>
+
+    <div class="group">
+      <button id="btn-new" title="New image">New</button>
+      <button id="btn-open" title="Open image">Open</button>
+      <input type="file" id="file-input" accept="image/png,image/jpeg,image/bmp,image/*" hidden />
+      <select id="save-format" title="Save format">
+        <option value="png">PNG</option>
+        <option value="jpg">JPG</option>
+        <option value="bmp">BMP</option>
+      </select>
+      <button id="btn-save" title="Save image">Save</button>
+    </div>
+
+    <div class="group" id="tools">
+      <button class="tool-btn active" data-tool="pencil" title="Pencil (P)">Pencil</button>
+      <button class="tool-btn" data-tool="eraser" title="Eraser — paints transparency (E)">Eraser</button>
+      <button class="tool-btn" data-tool="fill"   title="Fill (F)">Fill</button>
+      <button class="tool-btn" data-tool="picker" title="Eyedropper (I) — right-click also picks">Pick</button>
+    </div>
+
+    <div class="group">
+      <button id="btn-undo" title="Undo (Cmd/Ctrl+Z)">Undo</button>
+      <button id="btn-redo" title="Redo (Cmd/Ctrl+Shift+Z)">Redo</button>
+    </div>
+
+    <div class="group">
+      <button id="btn-resize" title="Resize image">Resize…</button>
+      <button id="btn-crop"   title="Crop to opaque content">Crop</button>
+    </div>
+
+    <div class="group">
+      <button id="btn-zoom-out" title="Zoom out (-)">−</button>
+      <span id="zoom-label">1×</span>
+      <button id="btn-zoom-in" title="Zoom in (+)">+</button>
+      <label class="check"><input type="checkbox" id="grid-toggle" /> Grid</label>
+    </div>
+
+    <div class="group" id="color-section">
+      <input type="color" id="current-color" value="#cb6e4a" title="Current color" />
+      <div id="palette" title="Click swatch to use · right-click to remove"></div>
+    </div>
+
+    <span id="status"></span>
+  </header>
+
+  <main>
+    <div id="canvas-wrap">
+      <div id="canvas-stage" class="checker">
+        <canvas id="art"></canvas>
+        <div id="grid-overlay" class="grid hidden"></div>
+      </div>
+    </div>
+  </main>
+
+  <dialog id="new-dialog">
+    <form method="dialog">
+      <h3>New image</h3>
+      <label>Width  <input type="number" id="new-w" min="1" max="2048" value="32" /></label>
+      <label>Height <input type="number" id="new-h" min="1" max="2048" value="32" /></label>
+      <div class="actions">
+        <button value="cancel">Cancel</button>
+        <button value="ok" id="new-ok">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="import-dialog">
+    <form method="dialog">
+      <h3>Import image</h3>
+      <div class="import-body">
+        <div class="preview-wrap">
+          <canvas id="import-preview-img"></canvas>
+          <canvas id="import-preview-grid"></canvas>
+        </div>
+        <div class="import-controls">
+          <p>Original: <span id="import-orig"></span></p>
+          <label>Width  <input type="number" id="import-w" min="1" max="2048" /></label>
+          <label>Height <input type="number" id="import-h" min="1" max="2048" /></label>
+          <label class="check"><input type="checkbox" id="import-keep-aspect" checked /> Lock aspect</label>
+          <label class="check"><input type="checkbox" id="import-extract-palette" checked /> Extract palette from image</label>
+          <p class="hint">The grid shows how source pixels map to output pixels.</p>
+        </div>
+      </div>
+      <div class="actions">
+        <button value="cancel">Cancel</button>
+        <button value="ok" id="import-ok">Import</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="resize-dialog">
+    <form method="dialog">
+      <h3>Resize</h3>
+      <label>Width  <input type="number" id="resize-w" min="1" max="2048" /></label>
+      <label>Height <input type="number" id="resize-h" min="1" max="2048" /></label>
+      <label class="check"><input type="checkbox" id="resize-keep-aspect" checked /> Lock aspect</label>
+      <div class="actions">
+        <button value="cancel">Cancel</button>
+        <button value="ok" id="resize-ok">Resize</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
