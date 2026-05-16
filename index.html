@@ -24,7 +24,6 @@
 
     <div class="group" id="tools">
       <button class="tool-btn active" data-tool="pencil" title="Pencil (P)">Pencil</button>
-      <button class="tool-btn" data-tool="eraser" title="Eraser — paints transparency (E)">Eraser</button>
       <button class="tool-btn" data-tool="fill"   title="Fill (F)">Fill</button>
       <button class="tool-btn" data-tool="picker" title="Eyedropper (I) — right-click also picks">Pick</button>
     </div>
@@ -44,10 +43,18 @@
       <span id="zoom-label">1×</span>
       <button id="btn-zoom-in" title="Zoom in (+)">+</button>
       <label class="check"><input type="checkbox" id="grid-toggle" /> Grid</label>
+      <label class="check"><input type="checkbox" id="alpha-preview" /> α preview</label>
     </div>
 
     <div class="group" id="color-section">
-      <input type="color" id="current-color" value="#cb6e4a" title="Current color" />
+      <input type="color" id="current-color" value="#cb6e4a" title="Current color (RGB)" />
+      <span class="alpha-control" title="Alpha (0 = transparent, 255 = opaque)">
+        <span class="alpha-label">α</span>
+        <input type="range" id="alpha-slider" min="0" max="255" value="255" />
+        <input type="number" id="alpha-number" min="0" max="255" value="255" />
+      </span>
+      <div id="current-color-preview" class="swatch" title="Effective RGBA"></div>
+      <button id="btn-eraser" title="Set alpha to 0 (E)">Erase</button>
       <div id="palette" title="Click swatch to use · right-click to remove"></div>
     </div>
 
@@ -58,6 +65,7 @@
     <div id="canvas-wrap">
       <div id="canvas-stage" class="checker">
         <canvas id="art"></canvas>
+        <canvas id="art-alpha-preview" class="hidden"></canvas>
         <div id="grid-overlay" class="grid hidden"></div>
       </div>
     </div>

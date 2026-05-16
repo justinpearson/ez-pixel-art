@@ -5,17 +5,19 @@
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
   // ---------- DOM ----------
-  const artCanvas    = $('#art');
-  const artCtx       = artCanvas.getContext('2d', { willReadFrequently: true });
-  const stage        = $('#canvas-stage');
-  const gridOverlay  = $('#grid-overlay');
-  const wrap         = $('#canvas-wrap');
+  const artCanvas     = $('#art');
+  const artCtx        = artCanvas.getContext('2d', { willReadFrequently: true });
+  const previewCanvas = $('#art-alpha-preview');
+  const previewCtx    = previewCanvas.getContext('2d');
+  const stage         = $('#canvas-stage');
+  const gridOverlay   = $('#grid-overlay');
+  const wrap          = $('#canvas-wrap');
 
   // ---------- State ----------
   let imgW = 32, imgH = 32;
   let zoom = 16;
   const MIN_ZOOM = 1, MAX_ZOOM = 64;
-  let currentColor = [203, 110, 74];   // rgb of #cb6e4a
+  let currentColor = [203, 110, 74, 255];   // rgba of #cb6e4aff
   let currentTool  = 'pencil';
   let isDrawing    = false;
   let lastPx       = null;
@@ -30,19 +32,23 @@
     '#ff004d', '#ffa300', '#ffec27', '#00e436',
     '#29adff', '#83769c', '#ff77a8', '#ffccaa',
   ];
-  let palette = [...DEFAULT_PALETTE];
+  let palette = DEFAULT_PALETTE.map(h => h + 'ff');
 
   // ---------- Color helpers ----------
-  function hexToRgb(hex) {
+  function hexToRgba(hex) {
     hex = hex.replace('#', '');
     if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
-    return [
-      parseInt(hex.slice(0, 2), 16),
-      parseInt(hex.slice(2, 4), 16),
-      parseInt(hex.slice(4, 6), 16),
-    ];
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    const a = hex.length >= 8 ? parseInt(hex.slice(6, 8), 16) : 255;
+    return [r, g, b, a];
   }
-  function rgbToHex([r, g, b]) {
+  function rgbaToHex([r, g, b, a]) {
+    const h = n => n.toString(16).padStart(2, '0');
+    return '#' + h(r) + h(g) + h(b) + h(a);
+  }
+  function rgbToHex6([r, g, b]) {
     const h = n => n.toString(16).padStart(2, '0');
     return '#' + h(r) + h(g) + h(b);
   }
@@ -53,6 +59,8 @@
     imgH = h;
     artCanvas.width  = w;
     artCanvas.height = h;
+    previewCanvas.width  = w;
+    previewCanvas.height = h;
     artCtx.imageSmoothingEnabled = false;
     applyZoom();
   }
@@ -61,6 +69,8 @@
     const cssH = imgH * zoom;
     artCanvas.style.width  = cssW + 'px';
     artCanvas.style.height = cssH + 'px';
+    previewCanvas.style.width  = cssW + 'px';
+    previewCanvas.style.height = cssH + 'px';
     stage.style.width      = cssW + 'px';
     stage.style.height     = cssH + 'px';
     gridOverlay.style.setProperty('--cell', zoom + 'px');
@@ -94,13 +104,17 @@
     artCanvas.style.cursor = (name === 'picker') ? 'crosshair' : 'cell';
   }
 
+  // putImageData writes the exact RGBA we want; fillStyle+fillRect would
+  // round-trip through pre-multiplied alpha and lose precision at mid alphas.
+  const paintPixelBuf = artCtx.createImageData(1, 1);
   function paintPixel(x, y) {
     if (!inBounds(x, y)) return;
-    artCtx.clearRect(x, y, 1, 1);
-    if (currentTool === 'eraser') return;
-    const [r, g, b] = currentColor;
-    artCtx.fillStyle = `rgb(${r},${g},${b})`;
-    artCtx.fillRect(x, y, 1, 1);
+    const [r, g, b, a] = currentColor;
+    paintPixelBuf.data[0] = r;
+    paintPixelBuf.data[1] = g;
+    paintPixelBuf.data[2] = b;
+    paintPixelBuf.data[3] = a;
+    artCtx.putImageData(paintPixelBuf, x, y);
   }
 
   function lineBresenham(x0, y0, x1, y1, fn) {
@@ -121,9 +135,7 @@
     const d  = id.data;
     const si = (sy * imgW + sx) * 4;
     const tr = d[si], tg = d[si+1], tb = d[si+2], ta = d[si+3];
-    let nr, ng, nb, na;
-    if (currentTool === 'eraser') { nr = ng = nb = na = 0; }
-    else { [nr, ng, nb] = currentColor; na = 255; }
+    const [nr, ng, nb, na] = currentColor;
     if (tr === nr && tg === ng && tb === nb && ta === na) return false;
     const stack = [sx | 0, sy | 0];
     while (stack.length) {
@@ -141,8 +153,8 @@
   function pickColor(x, y, switchToPencil = true) {
     const px = artCtx.getImageData(x, y, 1, 1).data;
     if (px[3] === 0) return;
-    currentColor = [px[0], px[1], px[2]];
-    $('#current-color').value = rgbToHex(currentColor);
+    currentColor = [px[0], px[1], px[2], px[3]];
+    syncColorUI();
     if (switchToPencil) setTool('pencil');
   }
 
@@ -151,6 +163,7 @@
   function restore(snap) {
     setCanvasSize(snap.width, snap.height);
     artCtx.putImageData(snap, 0, 0);
+    if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
   }
   function pushUndo() {
     undoStack.push(snapshot());
@@ -285,7 +298,7 @@
     return Array.from(counts.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, maxColors)
-      .map(([key]) => rgbToHex([(key >> 16) & 0xff, (key >> 8) & 0xff, key & 0xff]));
+      .map(([key]) => rgbaToHex([(key >> 16) & 0xff, (key >> 8) & 0xff, key & 0xff, 255]));
   }
 
   // ---------- Palette UI ----------
@@ -293,10 +306,11 @@
     const el = $('#palette');
     el.innerHTML = '';
     palette.forEach((hex, i) => {
+      const [r, g, b, a] = hexToRgba(hex);
       const sw = document.createElement('button');
       sw.type = 'button';
       sw.className = 'swatch';
-      sw.style.background = hex;
+      sw.style.setProperty('--swatch-color', `rgba(${r},${g},${b},${a/255})`);
       sw.title = hex + '  (right-click to remove)';
       sw.addEventListener('click', () => setColorFromHex(hex));
       sw.addEventListener('contextmenu', e => {
@@ -312,14 +326,60 @@
     add.textContent = '+';
     add.title = 'Add current color to palette';
     add.addEventListener('click', () => {
-      const hex = rgbToHex(currentColor);
+      const hex = rgbaToHex(currentColor);
       if (!palette.includes(hex)) { palette.push(hex); renderPalette(); }
     });
     el.appendChild(add);
   }
   function setColorFromHex(hex) {
-    currentColor = hexToRgb(hex);
-    $('#current-color').value = hex;
+    const [r, g, b, a] = hexToRgba(hex);
+    // hex-6/3 carries no alpha — preserve the user's current alpha.
+    const hasAlpha = hex.replace('#', '').length >= 8;
+    currentColor = [r, g, b, hasAlpha ? a : currentColor[3]];
+    syncColorUI();
+  }
+  function syncColorUI() {
+    const [r, g, b, a] = currentColor;
+    $('#current-color').value = rgbToHex6(currentColor);
+    $('#alpha-slider').value  = a;
+    $('#alpha-number').value  = a;
+    $('#current-color-preview').style.setProperty(
+      '--swatch-color', `rgba(${r},${g},${b},${a/255})`);
+  }
+  function setAlpha(a) {
+    if (!Number.isFinite(a)) return;
+    currentColor[3] = Math.max(0, Math.min(255, a | 0));
+    syncColorUI();
+  }
+  function eraseMode() {
+    currentColor[3] = 0;
+    syncColorUI();
+    setTool('pencil');
+  }
+
+  // ---------- Alpha-as-grayscale preview ----------
+  // Photoshop convention: white = opaque, black = transparent.
+  function refreshAlphaPreview() {
+    const src = artCtx.getImageData(0, 0, imgW, imgH);
+    const out = previewCtx.createImageData(imgW, imgH);
+    for (let i = 0; i < src.data.length; i += 4) {
+      const a = src.data[i + 3];
+      out.data[i] = a;
+      out.data[i + 1] = a;
+      out.data[i + 2] = a;
+      out.data[i + 3] = 255;
+    }
+    previewCtx.putImageData(out, 0, 0);
+  }
+  function setAlphaPreview(on) {
+    if (on) {
+      refreshAlphaPreview();
+      previewCanvas.classList.remove('hidden');
+      artCanvas.classList.add('hidden');
+    } else {
+      previewCanvas.classList.add('hidden');
+      artCanvas.classList.remove('hidden');
+    }
   }
 
   // ---------- Status ----------
@@ -373,11 +433,15 @@
   // ---------- Top bar wiring ----------
   $$('#tools .tool-btn').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
   $('#current-color').addEventListener('input', (e) => setColorFromHex(e.target.value));
+  $('#alpha-slider').addEventListener('input', (e) => setAlpha(parseInt(e.target.value, 10)));
+  $('#alpha-number').addEventListener('input', (e) => setAlpha(parseInt(e.target.value, 10)));
+  $('#btn-eraser').addEventListener('click', eraseMode);
   $('#btn-undo').addEventListener('click', undo);
   $('#btn-redo').addEventListener('click', redo);
   $('#btn-zoom-in') .addEventListener('click', () => { zoom = Math.min(MAX_ZOOM, zoom + 1); applyZoom(); });
   $('#btn-zoom-out').addEventListener('click', () => { zoom = Math.max(MIN_ZOOM, zoom - 1); applyZoom(); });
   $('#grid-toggle').addEventListener('change', (e) => gridOverlay.classList.toggle('hidden', !e.target.checked));
+  $('#alpha-preview').addEventListener('change', (e) => setAlphaPreview(e.target.checked));
   $('#btn-save').addEventListener('click', () => saveImage($('#save-format').value));
 
   // ---------- New ----------
@@ -548,7 +612,7 @@
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     switch (k) {
       case 'p': setTool('pencil'); break;
-      case 'e': setTool('eraser'); break;
+      case 'e': eraseMode();       break;
       case 'f': setTool('fill');   break;
       case 'i': setTool('picker'); break;
       case '=': case '+':
@@ -565,7 +629,7 @@
   });
 
   // ---------- Init ----------
-  setColorFromHex('#cb6e4a');
+  syncColorUI();
   renderPalette();
   setCanvasSize(32, 32);
   setTool('pencil');
