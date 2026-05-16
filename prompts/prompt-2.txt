@@ -1,0 +1,27 @@
+
+
+- Alpha channel. Let's support transparency (alpha) which can be 0 to 255. Each color is now (r,g,b,a). Color palette & "currently selected color" icon need to show that somehow. And add a checkbox to view the alpha channel as grayscale "preview", so i can easily see the transparency of my pic.
+
+- In the color palette, under the currently-selected color, show its RGB.
+
+- Cute idea with the "details on hover" for when you hover over colors in the palette, but TBH I don't like hover text because it's too hidden. Generally speaking, I prefer the menu to be plain and visible upfront, even if that makes it show a lot of stuff. I do not think that looks visually cluttered. IMO, it's better to see everything at once, without having to hunt around hovering over everything.
+
+- Love the upper-right "cursor stats", eg, the cursor's current position. Add the "color currently under cursor" too. This should work regardless of what tool is selected.
+
+- Adjustable Pencil size, not just 1px.
+
+- Cursor. Instead of just being cross-hairs, it'd be nice if I could somehow get a preview of what clicking will do. Eg, if Pencil is selected, so that click fills in the underlying pixel area with the currently-selected color, it'd be nice if I could "preview" that by actually having the cursor appear to color that underlying pixel area that I'm mousing over, and therefore a "click" just sort of "commits" that proposed color change. Same with Eraser and Fill: hovering around dynamically shows a preview of what the picture will look like after I click.
+
+- Eraser. Keep the button, but all it does it set alpha = 0. That way we re-use the Pencil for erasing: simpler.
+
+- Color picker eyedropper button should be near the color palette.
+
+- Menu buttons labels show keyboard shortcuts. In "Pencil", make the P bold so users know they can select Pencil by typing the "p" key. Use 1st letter when it doesn't conflict with another button. So "u" for Undo, "r" for Redo (no cmd/ctrl modifier key)
+
+- Add "Rectangle" and "Line" tools. Drag to create. Can pick line thickness. Can pick whether rect is filled or empty, and if empty, what's the thickness. Both tools display "preview" shapes while dragging. Hit ESC during drag to cancel the drag, in case I change my mind and don't want to commit the line / rect. Obviously rect snaps to grid, and line does too, it's ok if the line is all pixelated, that's the point.
+
+- Resize. Currently resize is a modal. That's hard because I can't see what's going to happen. Instead, let's have it work like this: It overlays another grid, which is the proposed pixel grid of what the resize will do. And there's arrow buttons to shift that resized grid around with respect to the current grid, to get the pixels to line up right. Then when you actually "accept" the resize, the 
+
+- Color palette quantizer / squasher. I need some way to deal with situations where an imported image has a ton of pixels that are all basically the same color, but slightly different. This comes up at the edges of a shape, due to anti-aliasing or something. I also want a way to view how many pixels of each color I have, and easily "squash" similar colors into their closest dominant color. Not exactly sure what that UI should look like.
+
+- Selection tools. single-pixel, whole-row/column, rectangular, contiguous color, or non-contiguous color. Not sure how to indicate there's an "active" selection, maybe a light-blue outline around the selection or selected pixels. If there is an active selection, you can delete it (alpha=0) or recolor it. Not sure what the UI should be here.
