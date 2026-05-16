@@ -521,5 +521,82 @@
         ['outside (12,15) still filled', app.pix(12, 15), ORANGE],
       ],
     },
+
+    // ===== prompt-2 polish bundle: items 5, 9, 17, 19 (TDD) =====
+
+    {
+      label: '34-rgb-readout-initial',
+      description: 'Default color shows rgba(203, 110, 74, 255) readout near the preview swatch.',
+      run: async () => {},
+      assertions: (app) => [
+        ['readout text', app.q('#current-color-info').textContent.trim(), 'rgba(203, 110, 74, 255)'],
+      ],
+    },
+
+    {
+      label: '35-rgb-readout-tracks-alpha',
+      description: 'After dropping α to 128, readout shows the new alpha.',
+      run: async (app) => { app.setAlpha(128); },
+      assertions: (app) => [
+        ['readout text', app.q('#current-color-info').textContent.trim(), 'rgba(203, 110, 74, 128)'],
+      ],
+    },
+
+    {
+      label: '36-status-color-under-cursor',
+      description: 'Pointer hover over a painted pixel — status text includes that pixel\'s RGBA.',
+      run: async (app) => {
+        app.click(10, 10);              // paint pixel ORANGE
+        app.pointerMove(10, 10);        // hover over it (handler still fires)
+      },
+      assertions: (app) => [
+        ['status mentions pixel rgba',
+         app.q('#status').textContent.includes('rgba(203, 110, 74, 255)'), true],
+      ],
+    },
+
+    {
+      label: '37-pick-button-near-palette',
+      description: 'Pick (eyedropper) lives in the color section near the palette, not in the #tools group.',
+      run: async () => {},
+      assertions: (app) => [
+        ['picker in #color-section', !!app.q('#color-section [data-tool="picker"]'), true],
+        ['picker NOT in #tools',     !!app.q('#tools [data-tool="picker"]'),         false],
+        ['picker still clickable',   typeof app.q('[data-tool="picker"]').click,     'function'],
+      ],
+    },
+
+    {
+      label: '38-shortcut-letters-bolded',
+      description: 'Tool/action button labels wrap their keyboard shortcut letter in <b>.',
+      run: async () => {},
+      assertions: (app) => [
+        ['Pencil',  app.q('[data-tool="pencil"]').innerHTML, '<b>P</b>encil'],
+        ['Fill',    app.q('[data-tool="fill"]').innerHTML,   '<b>F</b>ill'],
+        ['Pick',    app.q('[data-tool="picker"]').innerHTML, 'P<b>i</b>ck'],
+        ['Rect',    app.q('[data-tool="rect"]').innerHTML,   '<b>R</b>ect'],
+        ['Line',    app.q('[data-tool="line"]').innerHTML,   '<b>L</b>ine'],
+        ['Erase',   app.q('#btn-eraser').innerHTML,           '<b>E</b>rase'],
+        ['Undo',    app.q('#btn-undo').innerHTML,             '<b>U</b>ndo'],
+        ['Grid label has bold G',
+         app.q('#grid-toggle').closest('label').innerHTML.includes('<b>G</b>rid'), true],
+      ],
+    },
+
+    {
+      label: '39-keyboard-u-undo',
+      description: 'Plain U key triggers undo (without Cmd/Ctrl). R stays bound to Rect; Redo keeps Cmd-Shift-Z.',
+      run: async (app) => {
+        app.click(10, 10);
+        const before = app.pix(10, 10);
+        app.keyboard('u');
+        const after = app.pix(10, 10);
+        return { before, after };
+      },
+      assertions: (_app, ctx) => [
+        ['before undo (painted)', ctx.before, ORANGE],
+        ['after undo (cleared)',  ctx.after,  TRANSPARENT],
+      ],
+    },
   ];
 })();
