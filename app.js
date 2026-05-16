@@ -9,6 +9,8 @@
   const artCtx        = artCanvas.getContext('2d', { willReadFrequently: true });
   const previewCanvas = $('#art-alpha-preview');
   const previewCtx    = previewCanvas.getContext('2d');
+  const hoverCanvas   = $('#hover-overlay');
+  const hoverCtx      = hoverCanvas.getContext('2d');
   const stage         = $('#canvas-stage');
   const gridOverlay   = $('#grid-overlay');
   const wrap          = $('#canvas-wrap');
@@ -59,6 +61,8 @@
     artCanvas.height = h;
     previewCanvas.width  = w;
     previewCanvas.height = h;
+    hoverCanvas.width    = w;
+    hoverCanvas.height   = h;
     artCtx.imageSmoothingEnabled = false;
     applyZoom();
   }
@@ -69,6 +73,8 @@
     artCanvas.style.height = cssH + 'px';
     previewCanvas.style.width  = cssW + 'px';
     previewCanvas.style.height = cssH + 'px';
+    hoverCanvas.style.width    = cssW + 'px';
+    hoverCanvas.style.height   = cssH + 'px';
     stage.style.width      = cssW + 'px';
     stage.style.height     = cssH + 'px';
     gridOverlay.style.setProperty('--cell', zoom + 'px');
@@ -97,15 +103,17 @@
   // ---------- Tool helpers ----------
   // putImageData writes the exact RGBA we want; fillStyle+fillRect would
   // round-trip through pre-multiplied alpha and lose precision at mid alphas.
+  // ctx/rgba default to the main canvas and the user's current color, so the
+  // overwhelming majority of callsites stay one-liners. The hover preview
+  // overrides both to draw into the overlay with its own marker color.
   const paintPixelBuf = artCtx.createImageData(1, 1);
-  function paintPixel(x, y) {
+  function paintPixel(x, y, ctx = artCtx, rgba = currentColor) {
     if (!inBounds(x, y)) return;
-    const [r, g, b, a] = currentColor;
-    paintPixelBuf.data[0] = r;
-    paintPixelBuf.data[1] = g;
-    paintPixelBuf.data[2] = b;
-    paintPixelBuf.data[3] = a;
-    artCtx.putImageData(paintPixelBuf, x, y);
+    paintPixelBuf.data[0] = rgba[0];
+    paintPixelBuf.data[1] = rgba[1];
+    paintPixelBuf.data[2] = rgba[2];
+    paintPixelBuf.data[3] = rgba[3];
+    ctx.putImageData(paintPixelBuf, x, y);
   }
 
   function lineBresenham(x0, y0, x1, y1, fn) {
@@ -157,12 +165,12 @@
   }
   // Stamps a `size`×`size` square centred on (cx, cy). paintPixel handles
   // out-of-bounds clipping so brushes near canvas edges just lose pixels.
-  function stamp(cx, cy, size) {
-    if (size <= 1) { paintPixel(cx, cy); return; }
+  function stamp(cx, cy, size, ctx, rgba) {
+    if (size <= 1) { paintPixel(cx, cy, ctx, rgba); return; }
     const half = Math.floor(size / 2);
     for (let dy = -half; dy <= size - 1 - half; dy++)
       for (let dx = -half; dx <= size - 1 - half; dx++)
-        paintPixel(cx + dx, cy + dy);
+        paintPixel(cx + dx, cy + dy, ctx, rgba);
   }
   function drawRect(p0, p1, filled, thickness) {
     const minX = Math.min(p0.x, p1.x), maxX = Math.max(p0.x, p1.x);
@@ -211,6 +219,16 @@
       },
       onUp()     { this.lastPx = null; },
       onCancel() { this.lastPx = null; },
+      // Hover preview: draws the about-to-paint pixels on #hover-overlay.
+      // For Erase (α=0) we'd otherwise stamp nothing — substitute a contrasting
+      // marker so the user can see where the cursor will erase.
+      onHover(p) {
+        clearHoverOverlay();
+        const rgba = currentColor[3] === 0
+          ? [128, 128, 128, 180]   // erase marker
+          : currentColor;
+        stamp(p.x, p.y, getThickness(), hoverCtx, rgba);
+      },
     },
     fill: {
       cursor: 'cell',
@@ -290,6 +308,7 @@
     $$('.tool-btn').forEach(b =>
       b.classList.toggle('active', b.dataset.tool === name));
     artCanvas.style.cursor = tools[name]?.cursor ?? 'cell';
+    clearHoverOverlay();
   }
 
   // ---------- Undo / redo ----------
@@ -493,6 +512,11 @@
     setTool('pencil');
   }
 
+  // ---------- Hover overlay ----------
+  function clearHoverOverlay() {
+    hoverCtx.clearRect(0, 0, imgW, imgH);
+  }
+
   // ---------- Alpha-as-grayscale preview ----------
   // Photoshop convention: white = opaque, black = transparent.
   function refreshAlphaPreview() {
@@ -541,13 +565,19 @@
     const p = pointerToPixel(e);
     if (!inBounds(p.x, p.y)) return;
     activeStroke = true;
+    clearHoverOverlay();
     tools[currentTool].onDown?.(p, e);
   });
   artCanvas.addEventListener('pointermove', (e) => {
     const p = pointerToPixel(e);
     updateStatus(p);
-    if (!activeStroke) return;
-    tools[currentTool].onMove?.(p, e);
+    if (activeStroke) {
+      tools[currentTool].onMove?.(p, e);
+    } else if (inBounds(p.x, p.y)) {
+      tools[currentTool].onHover?.(p, e);
+    } else {
+      clearHoverOverlay();
+    }
   });
   artCanvas.addEventListener('pointerup', (e) => {
     if (!activeStroke) return;
@@ -559,6 +589,7 @@
     activeStroke = false;
     tools[currentTool].onCancel?.();
   });
+  artCanvas.addEventListener('pointerleave', clearHoverOverlay);
   artCanvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     const p = pointerToPixel(e);
