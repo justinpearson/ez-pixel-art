@@ -65,7 +65,8 @@ body { display: flex; flex-direction: column; }
 .alpha-label { color: #555; font-style: italic; }
 #alpha-slider { width: 80px; }
 #alpha-number,
-#shape-thickness {
+#shape-thickness,
+#quantize-n {
   width: 52px;
   padding: 2px 4px;
   font: inherit;

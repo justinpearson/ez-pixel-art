@@ -498,6 +498,45 @@
       .map(([key]) => rgbaToHex([(key >> 16) & 0xff, (key >> 8) & 0xff, key & 0xff, 255]));
   }
 
+  // Squash the image to the top `maxColors` most-common RGBA tuples; every
+  // other non-transparent pixel is remapped to the nearest survivor in
+  // Euclidean RGBA distance. Transparent pixels are left alone. The palette
+  // is replaced with the kept colors.
+  function quantize(maxColors) {
+    const id = artCtx.getImageData(0, 0, imgW, imgH);
+    const d  = id.data;
+    const counts = new Map();
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] === 0) continue;
+      const key = `${d[i]},${d[i+1]},${d[i+2]},${d[i+3]}`;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    if (counts.size === 0) return;
+    const top = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, maxColors)
+      .map(([key]) => key.split(',').map(Number));
+    pushUndo();
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] === 0) continue;
+      let best = top[0], bestDist = Infinity;
+      for (const c of top) {
+        const dr = c[0] - d[i], dg = c[1] - d[i+1], db = c[2] - d[i+2], da = c[3] - d[i+3];
+        const dist = dr*dr + dg*dg + db*db + da*da;
+        if (dist < bestDist) { bestDist = dist; best = c; }
+      }
+      d[i] = best[0]; d[i+1] = best[1]; d[i+2] = best[2]; d[i+3] = best[3];
+    }
+    artCtx.putImageData(id, 0, 0);
+    palette = top.map(rgbaToHex);
+    renderPalette();
+    if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
+  }
+  function getQuantizeN() {
+    const n = parseInt($('#quantize-n').value, 10);
+    return Math.max(1, Math.min(64, Number.isFinite(n) ? n : 16));
+  }
+
   // ---------- Palette UI ----------
   function renderPalette() {
     const el = $('#palette');
@@ -689,6 +728,7 @@
   $('#grid-toggle').addEventListener('change', (e) => gridOverlay.classList.toggle('hidden', !e.target.checked));
   $('#alpha-preview').addEventListener('change', (e) => setAlphaPreview(e.target.checked));
   $('#btn-save').addEventListener('click', () => saveImage($('#save-format').value));
+  $('#btn-quantize').addEventListener('click', () => quantize(getQuantizeN()));
 
   // ---------- New ----------
   $('#btn-new').addEventListener('click', () => {

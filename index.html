@@ -67,6 +67,11 @@
       <div id="palette" title="Click swatch to use · right-click to remove"></div>
     </div>
 
+    <div class="group" id="palette-ops">
+      <label>Max colors <input type="number" id="quantize-n" min="1" max="64" value="16" /></label>
+      <button id="btn-quantize" title="Squash image to the N most-common colors; replaces palette with the kept colors">Quantize</button>
+    </div>
+
     <span id="status"></span>
   </header>
 
