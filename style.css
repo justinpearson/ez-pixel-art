@@ -110,6 +110,11 @@ body { display: flex; flex-direction: column; }
   margin-left: auto;
   color: #666;
   font-variant-numeric: tabular-nums;
+  /* Reserve space for the worst-case content (large dims + zoom + coords +
+     rgba) so the text width doesn't change as the cursor moves. Without
+     this the flex row wraps/unwraps mid-hover and the canvas jitters. */
+  min-width: 460px;
+  text-align: right;
 }
 
 /* ---------- Canvas area ---------- */
