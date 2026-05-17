@@ -635,6 +635,21 @@
     artCtx.putImageData(id, 0, 0);
     if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
   }
+  function recolorSelection() {
+    if (!selection) return;
+    pushUndo();
+    const id = artCtx.getImageData(0, 0, imgW, imgH);
+    const d  = id.data;
+    const [r, g, b, a] = currentColor;
+    for (let y = selection.minY; y <= selection.maxY; y++) {
+      for (let x = selection.minX; x <= selection.maxX; x++) {
+        const i = (y * imgW + x) * 4;
+        d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = a;
+      }
+    }
+    artCtx.putImageData(id, 0, 0);
+    if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
+  }
 
   // ---------- Alpha-as-grayscale preview ----------
   // Photoshop convention: white = opaque, black = transparent.
@@ -729,6 +744,7 @@
   $('#alpha-preview').addEventListener('change', (e) => setAlphaPreview(e.target.checked));
   $('#btn-save').addEventListener('click', () => saveImage($('#save-format').value));
   $('#btn-quantize').addEventListener('click', () => quantize(getQuantizeN()));
+  $('#btn-fill-selection').addEventListener('click', recolorSelection);
 
   // ---------- New ----------
   $('#btn-new').addEventListener('click', () => {
@@ -907,6 +923,9 @@
       case 'u': undo();            break;
       case 'delete': case 'backspace':
         if (selection) { deleteSelection(); e.preventDefault(); }
+        break;
+      case 'enter':
+        if (selection) { recolorSelection(); e.preventDefault(); }
         break;
       case 'escape':
         activeStroke = false;
