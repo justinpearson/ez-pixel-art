@@ -13,6 +13,8 @@
   const hoverCtx      = hoverCanvas.getContext('2d');
   const selectionCanvas = $('#selection-overlay');
   const selectionCtx    = selectionCanvas.getContext('2d');
+  const resizeGridCanvas = $('#resize-grid-overlay');
+  const resizeGridCtx    = resizeGridCanvas.getContext('2d');
   const stage         = $('#canvas-stage');
   const gridOverlay   = $('#grid-overlay');
   const wrap          = $('#canvas-wrap');
@@ -67,6 +69,8 @@
     hoverCanvas.height   = h;
     selectionCanvas.width  = w;
     selectionCanvas.height = h;
+    resizeGridCanvas.width  = w;
+    resizeGridCanvas.height = h;
     artCtx.imageSmoothingEnabled = false;
     applyZoom();
   }
@@ -81,6 +85,8 @@
     hoverCanvas.style.height   = cssH + 'px';
     selectionCanvas.style.width  = cssW + 'px';
     selectionCanvas.style.height = cssH + 'px';
+    resizeGridCanvas.style.width  = cssW + 'px';
+    resizeGridCanvas.style.height = cssH + 'px';
     stage.style.width      = cssW + 'px';
     stage.style.height     = cssH + 'px';
     gridOverlay.style.setProperty('--cell', zoom + 'px');
@@ -381,13 +387,29 @@
   }
 
   // ---------- Resize & crop ----------
-  function resizeImage(newW, newH) {
-    const tmp = document.createElement('canvas');
-    tmp.width = imgW; tmp.height = imgH;
-    tmp.getContext('2d').drawImage(artCanvas, 0, 0);
+  // Manual nearest-neighbour resample with an integer OLD-pixel shift.
+  // Used by the in-canvas resize mode; mapping is deterministic so tests
+  // can predict which OLD pixel each NEW pixel samples from.
+  function resampleWithShift(newW, newH, shiftX, shiftY) {
+    const oldW = imgW, oldH = imgH;
+    const src  = artCtx.getImageData(0, 0, oldW, oldH);
+    const out  = new ImageData(newW, newH);
+    for (let j = 0; j < newH; j++) {
+      for (let i = 0; i < newW; i++) {
+        let sx = Math.floor(i * oldW / newW + shiftX);
+        let sy = Math.floor(j * oldH / newH + shiftY);
+        sx = Math.max(0, Math.min(oldW - 1, sx));
+        sy = Math.max(0, Math.min(oldH - 1, sy));
+        const si = (sy * oldW + sx) * 4;
+        const di = (j * newW + i)  * 4;
+        out.data[di]     = src.data[si];
+        out.data[di + 1] = src.data[si + 1];
+        out.data[di + 2] = src.data[si + 2];
+        out.data[di + 3] = src.data[si + 3];
+      }
+    }
     setCanvasSize(newW, newH);
-    artCtx.imageSmoothingEnabled = false;
-    artCtx.drawImage(tmp, 0, 0, tmp.width, tmp.height, 0, 0, newW, newH);
+    artCtx.putImageData(out, 0, 0);
   }
   function cropToContent() {
     const id = artCtx.getImageData(0, 0, imgW, imgH);
@@ -866,33 +888,84 @@
     importImg = null;
   });
 
-  // ---------- Resize dialog ----------
-  $('#btn-resize').addEventListener('click', () => {
+  // ---------- In-canvas resize mode ----------
+  let resizeMode = false;
+  const RESIZE_GRID_COLOR = [40, 200, 70, 220];
+
+  function getResizeParams() {
+    const w  = clampDim($('#resize-w').value, imgW);
+    const h  = clampDim($('#resize-h').value, imgH);
+    const sx = parseInt($('#resize-shift-x').value, 10) || 0;
+    const sy = parseInt($('#resize-shift-y').value, 10) || 0;
+    return { w, h, sx, sy };
+  }
+  function drawResizeGrid() {
+    resizeGridCtx.clearRect(0, 0, imgW, imgH);
+    if (!resizeMode) return;
+    const { w: newW, h: newH, sx: shiftX, sy: shiftY } = getResizeParams();
+    const cellW = imgW / newW;
+    const cellH = imgH / newH;
+    // Vertical boundaries between proposed NEW pixels.
+    for (let j = 0; j <= newW; j++) {
+      const x = Math.floor(j * cellW + shiftX);
+      if (x < 0 || x >= imgW) continue;
+      for (let y = 0; y < imgH; y++) paintPixel(x, y, resizeGridCtx, RESIZE_GRID_COLOR);
+    }
+    for (let j = 0; j <= newH; j++) {
+      const y = Math.floor(j * cellH + shiftY);
+      if (y < 0 || y >= imgH) continue;
+      for (let x = 0; x < imgW; x++) paintPixel(x, y, resizeGridCtx, RESIZE_GRID_COLOR);
+    }
+  }
+  function enterResizeMode() {
+    resizeMode = true;
     $('#resize-w').value = imgW;
     $('#resize-h').value = imgH;
-    $('#resize-dialog').showModal();
-  });
+    $('#resize-shift-x').value = 0;
+    $('#resize-shift-y').value = 0;
+    $('#resize-ops').classList.add('active');
+    drawResizeGrid();
+  }
+  function exitResizeMode() {
+    resizeMode = false;
+    $('#resize-ops').classList.remove('active');
+    resizeGridCtx.clearRect(0, 0, imgW, imgH);
+  }
+  function applyResize() {
+    if (!resizeMode) return;
+    const { w, h, sx, sy } = getResizeParams();
+    if (w === imgW && h === imgH && sx === 0 && sy === 0) {
+      exitResizeMode();
+      return;
+    }
+    pushUndo();
+    resampleWithShift(w, h, sx, sy);
+    fitZoom();
+    exitResizeMode();
+  }
+
+  $('#btn-resize').addEventListener('click', enterResizeMode);
+  $('#btn-resize-apply').addEventListener('click', applyResize);
+  $('#btn-resize-cancel').addEventListener('click', exitResizeMode);
+
   $('#resize-w').addEventListener('input', () => {
-    if (!$('#resize-keep-aspect').checked) return;
-    const ratio = imgW / imgH;
-    const w = clampDim($('#resize-w').value, imgW);
-    $('#resize-h').value = Math.max(1, Math.round(w / ratio));
+    if ($('#resize-keep-aspect').checked) {
+      const ratio = imgW / imgH;
+      const w = clampDim($('#resize-w').value, imgW);
+      $('#resize-h').value = Math.max(1, Math.round(w / ratio));
+    }
+    drawResizeGrid();
   });
   $('#resize-h').addEventListener('input', () => {
-    if (!$('#resize-keep-aspect').checked) return;
-    const ratio = imgW / imgH;
-    const h = clampDim($('#resize-h').value, imgH);
-    $('#resize-w').value = Math.max(1, Math.round(h * ratio));
+    if ($('#resize-keep-aspect').checked) {
+      const ratio = imgW / imgH;
+      const h = clampDim($('#resize-h').value, imgH);
+      $('#resize-w').value = Math.max(1, Math.round(h * ratio));
+    }
+    drawResizeGrid();
   });
-  $('#resize-dialog').addEventListener('close', () => {
-    if ($('#resize-dialog').returnValue !== 'ok') return;
-    const w = clampDim($('#resize-w').value, imgW);
-    const h = clampDim($('#resize-h').value, imgH);
-    if (w === imgW && h === imgH) return;
-    pushUndo();
-    resizeImage(w, h);
-    fitZoom();
-  });
+  $('#resize-shift-x').addEventListener('input', drawResizeGrid);
+  $('#resize-shift-y').addEventListener('input', drawResizeGrid);
 
   // ---------- Crop ----------
   $('#btn-crop').addEventListener('click', () => {
@@ -931,6 +1004,7 @@
         activeStroke = false;
         tools[currentTool]?.onCancel?.();
         clearSelection();
+        if (resizeMode) exitResizeMode();
         break;
       case '=': case '+':
         zoom = Math.min(MAX_ZOOM, zoom + 1); applyZoom(); break;
