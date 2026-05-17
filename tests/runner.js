@@ -30,6 +30,10 @@
       const c = this.q('#hover-overlay');
       return Array.from(c.getContext('2d').getImageData(x, y, 1, 1).data);
     }
+    selectionPix(x, y) {
+      const c = this.q('#selection-overlay');
+      return Array.from(c.getContext('2d').getImageData(x, y, 1, 1).data);
+    }
 
     _coords(x, y) {
       const r = this.canvas.getBoundingClientRect();

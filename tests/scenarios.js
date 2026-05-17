@@ -687,5 +687,95 @@
         ['after click: #art painted',      ctx.afterClick,  ORANGE],
       ],
     },
+
+    // ===== prompt-2 item 27: Selection tools (rectangular first pass, TDD) =====
+
+    {
+      label: '46-select-tool-button',
+      description: 'Select tool button exists with bold S; clicking switches tool and sets cursor=crosshair.',
+      run: async (app) => { app.q('[data-tool="select"]').click(); },
+      assertions: (app) => [
+        ['active tool',  app.q('.tool-btn.active').dataset.tool,    'select'],
+        ['cursor',       app.canvas.style.cursor,                    'crosshair'],
+        ['button label', app.q('[data-tool="select"]').innerHTML,    '<b>S</b>elect'],
+      ],
+    },
+
+    {
+      label: '47-keyboard-s-select',
+      description: 'Keyboard S selects the Select tool.',
+      run: async (app) => { app.keyboard('s'); },
+      assertions: (app) => [
+        ['active tool', app.q('.tool-btn.active').dataset.tool, 'select'],
+      ],
+    },
+
+    {
+      label: '48-selection-drag-outline',
+      description: 'Drag with Select draws a blue outline on #selection-overlay; interior stays clear; #art is untouched.',
+      run: async (app) => {
+        app.q('[data-tool="select"]').click();
+        app.drag(4, 4, 8, 8);
+      },
+      assertions: (app) => [
+        ['outline NW (4,4)',         app.selectionPix(4, 4)[3] > 0,   true],
+        ['outline NE (8,4)',         app.selectionPix(8, 4)[3] > 0,   true],
+        ['outline SW (4,8)',         app.selectionPix(4, 8)[3] > 0,   true],
+        ['outline SE (8,8)',         app.selectionPix(8, 8)[3] > 0,   true],
+        ['outline mid-edge (6,4)',   app.selectionPix(6, 4)[3] > 0,   true],
+        ['interior (6,6) clear',     app.selectionPix(6, 6)[3],       0],
+        ['#art (5,5) unchanged',     app.pix(5, 5),                   TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '49-selection-esc-clears',
+      description: 'ESC after a committed selection clears the outline.',
+      run: async (app) => {
+        app.q('[data-tool="select"]').click();
+        app.drag(4, 4, 8, 8);
+        app.keyboard('Escape');
+      },
+      assertions: (app) => [
+        ['outline (4,4) gone', app.selectionPix(4, 4)[3], 0],
+        ['outline (8,8) gone', app.selectionPix(8, 8)[3], 0],
+      ],
+    },
+
+    {
+      label: '50-selection-delete-clears-pixels',
+      description: 'With an active selection, Delete sets the selected pixels to α=0; pixels outside the selection are untouched.',
+      run: async (app) => {
+        app.q('[data-tool="fill"]').click();
+        app.click(10, 10);                       // fill canvas with ORANGE
+        app.q('[data-tool="select"]').click();
+        app.drag(5, 5, 7, 7);
+        app.keyboard('Delete');
+      },
+      assertions: (app) => [
+        ['selected (5,5) cleared', app.pix(5, 5), TRANSPARENT],
+        ['selected (6,6) cleared', app.pix(6, 6), TRANSPARENT],
+        ['selected (7,7) cleared', app.pix(7, 7), TRANSPARENT],
+        ['outside W (4,5) kept',   app.pix(4, 5), ORANGE],
+        ['outside E (8,5) kept',   app.pix(8, 5), ORANGE],
+        ['outside N (5,4) kept',   app.pix(5, 4), ORANGE],
+        ['outside S (5,8) kept',   app.pix(5, 8), ORANGE],
+      ],
+    },
+
+    {
+      label: '51-selection-survives-tool-switch',
+      description: 'Committed selection remains visible after switching to Pencil (selection is global, not tool-local).',
+      run: async (app) => {
+        app.q('[data-tool="select"]').click();
+        app.drag(4, 4, 8, 8);
+        app.q('[data-tool="pencil"]').click();
+      },
+      assertions: (app) => [
+        ['outline still on (4,4)', app.selectionPix(4, 4)[3] > 0,           true],
+        ['outline still on (8,8)', app.selectionPix(8, 8)[3] > 0,           true],
+        ['active tool',            app.q('.tool-btn.active').dataset.tool,  'pencil'],
+      ],
+    },
   ];
 })();
