@@ -11,6 +11,8 @@
   const previewCtx    = previewCanvas.getContext('2d');
   const hoverCanvas   = $('#hover-overlay');
   const hoverCtx      = hoverCanvas.getContext('2d');
+  const selectionCanvas = $('#selection-overlay');
+  const selectionCtx    = selectionCanvas.getContext('2d');
   const stage         = $('#canvas-stage');
   const gridOverlay   = $('#grid-overlay');
   const wrap          = $('#canvas-wrap');
@@ -63,6 +65,8 @@
     previewCanvas.height = h;
     hoverCanvas.width    = w;
     hoverCanvas.height   = h;
+    selectionCanvas.width  = w;
+    selectionCanvas.height = h;
     artCtx.imageSmoothingEnabled = false;
     applyZoom();
   }
@@ -75,6 +79,8 @@
     previewCanvas.style.height = cssH + 'px';
     hoverCanvas.style.width    = cssW + 'px';
     hoverCanvas.style.height   = cssH + 'px';
+    selectionCanvas.style.width  = cssW + 'px';
+    selectionCanvas.style.height = cssH + 'px';
     stage.style.width      = cssW + 'px';
     stage.style.height     = cssH + 'px';
     gridOverlay.style.setProperty('--cell', zoom + 'px');
@@ -297,6 +303,43 @@
         this.before = null;
       },
     },
+    select: {
+      cursor: 'crosshair',
+      start: null,
+      onDown(p) {
+        // Starting a new drag abandons any prior committed selection.
+        this.start = p;
+        selection = null;
+        clearSelectionOverlay();
+      },
+      onMove(p) {
+        if (!this.start) return;
+        const minX = Math.min(this.start.x, p.x), maxX = Math.max(this.start.x, p.x);
+        const minY = Math.min(this.start.y, p.y), maxY = Math.max(this.start.y, p.y);
+        clearSelectionOverlay();
+        drawSelectionOutline(minX, minY, maxX, maxY);
+      },
+      onUp(p) {
+        if (!this.start) return;
+        const minX = Math.min(this.start.x, p.x), maxX = Math.max(this.start.x, p.x);
+        const minY = Math.min(this.start.y, p.y), maxY = Math.max(this.start.y, p.y);
+        selection = { minX, minY, maxX, maxY };
+        clearSelectionOverlay();
+        drawSelectionOutline(minX, minY, maxX, maxY);
+        this.start = null;
+      },
+      onCancel() {
+        // Abandons an in-progress drag. The committed selection (if any) is
+        // dismissed by the global Esc handler, not here, so cancelling a drag
+        // doesn't accidentally wipe a prior selection the user is keeping.
+        if (this.start) {
+          this.start = null;
+          clearSelectionOverlay();
+          if (selection) drawSelectionOutline(
+            selection.minX, selection.minY, selection.maxX, selection.maxY);
+        }
+      },
+    },
   };
 
   function setTool(name) {
@@ -515,6 +558,43 @@
   // ---------- Hover overlay ----------
   function clearHoverOverlay() {
     hoverCtx.clearRect(0, 0, imgW, imgH);
+  }
+
+  // ---------- Selection ----------
+  // selection is global (persists across tool switches) so the user can make
+  // a selection then switch to Pencil etc. without losing it. Esc dismisses.
+  let selection = null;  // null or { minX, minY, maxX, maxY }
+  const SELECTION_COLOR = [80, 140, 240, 220];
+
+  function clearSelectionOverlay() {
+    selectionCtx.clearRect(0, 0, imgW, imgH);
+  }
+  function clearSelection() {
+    selection = null;
+    clearSelectionOverlay();
+  }
+  function drawSelectionOutline(minX, minY, maxX, maxY) {
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        if (x === minX || x === maxX || y === minY || y === maxY) {
+          paintPixel(x, y, selectionCtx, SELECTION_COLOR);
+        }
+      }
+    }
+  }
+  function deleteSelection() {
+    if (!selection) return;
+    pushUndo();
+    const id = artCtx.getImageData(0, 0, imgW, imgH);
+    const d  = id.data;
+    for (let y = selection.minY; y <= selection.maxY; y++) {
+      for (let x = selection.minX; x <= selection.maxX; x++) {
+        const i = (y * imgW + x) * 4;
+        d[i] = 0; d[i + 1] = 0; d[i + 2] = 0; d[i + 3] = 0;
+      }
+    }
+    artCtx.putImageData(id, 0, 0);
+    if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
   }
 
   // ---------- Alpha-as-grayscale preview ----------
@@ -783,10 +863,15 @@
       case 'i': setTool('picker'); break;
       case 'r': setTool('rect');   break;
       case 'l': setTool('line');   break;
+      case 's': setTool('select'); break;
       case 'u': undo();            break;
+      case 'delete': case 'backspace':
+        if (selection) { deleteSelection(); e.preventDefault(); }
+        break;
       case 'escape':
         activeStroke = false;
         tools[currentTool]?.onCancel?.();
+        clearSelection();
         break;
       case '=': case '+':
         zoom = Math.min(MAX_ZOOM, zoom + 1); applyZoom(); break;

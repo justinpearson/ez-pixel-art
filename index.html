@@ -27,6 +27,7 @@
       <button class="tool-btn" data-tool="fill"   title="Fill (F)"><b>F</b>ill</button>
       <button class="tool-btn" data-tool="rect"   title="Rectangle (R) — drag to draw; Esc to cancel"><b>R</b>ect</button>
       <button class="tool-btn" data-tool="line"   title="Line (L) — drag to draw; Esc to cancel"><b>L</b>ine</button>
+      <button class="tool-btn" data-tool="select" title="Select (S) — drag to select; Delete clears selected pixels; Esc dismisses"><b>S</b>elect</button>
     </div>
 
     <div class="group" id="shape-options">
@@ -75,6 +76,7 @@
         <canvas id="art"></canvas>
         <canvas id="art-alpha-preview" class="hidden"></canvas>
         <canvas id="hover-overlay"></canvas>
+        <canvas id="selection-overlay"></canvas>
         <div id="grid-overlay" class="grid hidden"></div>
       </div>
     </div>
