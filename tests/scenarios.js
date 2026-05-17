@@ -954,5 +954,113 @@
         ['undone TRANSPARENT', ctx.restored, TRANSPARENT],
       ],
     },
+
+    // ===== prompt-2 item 23: In-canvas resize (TDD) =====
+
+    {
+      label: '63-resize-enters-in-canvas-mode',
+      description: 'Click Resize → #resize-ops becomes visible (no modal popup); old modal is gone.',
+      run: async (app) => { app.q('#btn-resize').click(); },
+      assertions: (app) => [
+        ['resize-ops visible',      app.q('#resize-ops').classList.contains('active'), true],
+        ['Apply button present',    !!app.q('#btn-resize-apply'),  true],
+        ['Cancel button present',   !!app.q('#btn-resize-cancel'), true],
+        ['shift X input present',   !!app.q('#resize-shift-x'),    true],
+        ['shift Y input present',   !!app.q('#resize-shift-y'),    true],
+        ['proposed W initial value', app.q('#resize-w').value,     '32'],
+        ['no resize-dialog markup',  !!app.q('#resize-dialog'),    false],
+      ],
+    },
+
+    {
+      label: '64-resize-apply-no-shift',
+      description: 'Resize 32×32 → 16×16 with shift 0/0 — OLD pixel (2,0) ends up at NEW (1,0); OLD (0,0) ends up at NEW (0,0).',
+      run: async (app) => {
+        app.click(2, 0);                         // paint OLD (2,0) ORANGE
+        app.q('#btn-resize').click();
+        app.q('#resize-w').value = '16';
+        app.q('#resize-h').value = '16';
+        app.q('#resize-shift-x').value = '0';
+        app.q('#resize-shift-y').value = '0';
+        app.q('#btn-resize-apply').click();
+      },
+      assertions: (app) => [
+        ['canvas width',                app.canvas.width,    16],
+        ['canvas height',               app.canvas.height,   16],
+        ['NEW (1,0) sampled OLD (2,0)', app.pix(1, 0),       ORANGE],
+        ['NEW (0,0) sampled OLD (0,0)', app.pix(0, 0),       TRANSPARENT],
+        ['resize-ops hidden again',     app.q('#resize-ops').classList.contains('active'), false],
+      ],
+    },
+
+    {
+      label: '65-resize-apply-with-shift-x',
+      description: 'Resize 32×32 → 16×16 with shift X=1 — OLD pixel (1,0) ends up at NEW (0,0) (was OLD (0,0) without shift).',
+      run: async (app) => {
+        app.click(1, 0);                         // paint OLD (1,0)
+        app.q('#btn-resize').click();
+        app.q('#resize-w').value = '16';
+        app.q('#resize-h').value = '16';
+        app.q('#resize-shift-x').value = '1';
+        app.q('#resize-shift-y').value = '0';
+        app.q('#btn-resize-apply').click();
+      },
+      assertions: (app) => [
+        ['NEW (0,0) sampled OLD (1,0)', app.pix(0, 0), ORANGE],
+      ],
+    },
+
+    {
+      label: '66-resize-esc-cancels',
+      description: 'Esc while in resize mode exits without applying — canvas dimensions preserved.',
+      run: async (app) => {
+        app.q('[data-tool="pencil"]').click();   // make sure tool is pencil so esc doesn't double-cancel something
+        app.q('#btn-resize').click();
+        app.q('#resize-w').value = '16';
+        app.q('#resize-h').value = '16';
+        app.keyboard('Escape');
+      },
+      assertions: (app) => [
+        ['canvas width preserved',  app.canvas.width,  32],
+        ['canvas height preserved', app.canvas.height, 32],
+        ['resize-ops hidden',       app.q('#resize-ops').classList.contains('active'), false],
+      ],
+    },
+
+    {
+      label: '67-resize-cancel-button',
+      description: 'Cancel button exits resize mode without applying.',
+      run: async (app) => {
+        app.q('#btn-resize').click();
+        app.q('#resize-w').value = '16';
+        app.q('#btn-resize-cancel').click();
+      },
+      assertions: (app) => [
+        ['canvas width preserved', app.canvas.width, 32],
+        ['resize-ops hidden',      app.q('#resize-ops').classList.contains('active'), false],
+      ],
+    },
+
+    {
+      label: '68-resize-undoable',
+      description: 'Undo after resize restores both dimensions and pixel content.',
+      run: async (app) => {
+        app.click(5, 5);                          // paint a pixel
+        app.q('#btn-resize').click();
+        app.q('#resize-w').value = '16';
+        app.q('#resize-h').value = '16';
+        app.q('#btn-resize-apply').click();
+        const afterDims  = [app.canvas.width, app.canvas.height];
+        app.pressUndo();
+        const undoneDims = [app.canvas.width, app.canvas.height];
+        const restoredPx = app.pix(5, 5);
+        return { afterDims, undoneDims, restoredPx };
+      },
+      assertions: (_app, ctx) => [
+        ['after resize 16x16',  ctx.afterDims,  [16, 16]],
+        ['after undo 32x32',    ctx.undoneDims, [32, 32]],
+        ['restored pixel',      ctx.restoredPx, ORANGE],
+      ],
+    },
   ];
 })();
