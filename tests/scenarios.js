@@ -777,5 +777,105 @@
         ['active tool',            app.q('.tool-btn.active').dataset.tool,  'pencil'],
       ],
     },
+
+    // ===== prompt-2 item 25: Palette quantizer (TDD) =====
+
+    {
+      label: '52-quantize-button-exists',
+      description: 'Quantize button + Max colors input (default 16) present in toolbar.',
+      run: async () => {},
+      assertions: (app) => [
+        ['button exists', !!app.q('#btn-quantize'), true],
+        ['N input',       app.q('#quantize-n').value, '16'],
+      ],
+    },
+
+    {
+      label: '53-quantize-to-one-color',
+      description: '9 ORANGE + 2 BLACK; quantize N=1 → every non-transparent pixel becomes ORANGE (most common).',
+      run: async (app) => {
+        for (let i = 0; i < 9; i++) app.click(i, 0);
+        app.pickSwatch(0);                       // first default swatch is BLACK
+        app.click(10, 0);
+        app.click(11, 0);
+        app.q('#quantize-n').value = '1';
+        app.q('#btn-quantize').click();
+      },
+      assertions: (app) => [
+        ['(0,0) ORANGE',  app.pix(0, 0),  ORANGE],
+        ['(10,0) ORANGE', app.pix(10, 0), ORANGE],
+        ['(11,0) ORANGE', app.pix(11, 0), ORANGE],
+      ],
+    },
+
+    {
+      label: '54-quantize-to-n-colors-remaps-rare',
+      description: '5 ORANGE + 3 BLACK + 1 dark-gray; quantize N=2 keeps top 2; dark-gray remaps to nearest (BLACK).',
+      run: async (app) => {
+        for (let i = 0; i < 5; i++) app.click(i, 0);
+        app.pickSwatch(0);                       // BLACK
+        app.click(5, 0); app.click(6, 0); app.click(7, 0);
+        const inp = app.q('#current-color');
+        inp.value = '#202020';
+        inp.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        app.click(8, 0);
+        app.q('#quantize-n').value = '2';
+        app.q('#btn-quantize').click();
+      },
+      assertions: (app) => [
+        ['ORANGE stays ORANGE',        app.pix(0, 0), ORANGE],
+        ['BLACK stays BLACK',          app.pix(5, 0), [0, 0, 0, 255]],
+        ['dark-gray remaps to BLACK',  app.pix(8, 0), [0, 0, 0, 255]],
+      ],
+    },
+
+    {
+      label: '55-quantize-preserves-transparency',
+      description: 'Transparent pixels stay transparent — they don\'t count toward the palette and aren\'t recoloured.',
+      run: async (app) => {
+        app.click(0, 0);
+        app.q('#quantize-n').value = '1';
+        app.q('#btn-quantize').click();
+      },
+      assertions: (app) => [
+        ['(0,0) painted',           app.pix(0, 0),  ORANGE],
+        ['(5,5) still transparent', app.pix(5, 5),  TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '56-quantize-replaces-palette',
+      description: 'After quantize, palette contains only the retained colors.',
+      run: async (app) => {
+        for (let i = 0; i < 5; i++) app.click(i, 0);
+        app.pickSwatch(0);
+        app.click(5, 0);
+        app.q('#quantize-n').value = '2';
+        app.q('#btn-quantize').click();
+      },
+      assertions: (app) => [
+        ['palette has 2 swatches', app.qa('#palette .swatch:not(.add-swatch)').length, 2],
+      ],
+    },
+
+    {
+      label: '57-quantize-undoable',
+      description: 'Undo after quantize restores the original (non-quantized) pixels.',
+      run: async (app) => {
+        for (let i = 0; i < 5; i++) app.click(i, 0);
+        app.pickSwatch(0);
+        app.click(5, 0);
+        app.q('#quantize-n').value = '1';
+        app.q('#btn-quantize').click();
+        const after = app.pix(5, 0);
+        app.pressUndo();
+        const restored = app.pix(5, 0);
+        return { after, restored };
+      },
+      assertions: (_app, ctx) => [
+        ['quantized (5,0) → ORANGE', ctx.after,    ORANGE],
+        ['undone (5,0) → BLACK',     ctx.restored, [0, 0, 0, 255]],
+      ],
+    },
   ];
 })();
