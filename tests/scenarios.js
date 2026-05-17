@@ -1062,5 +1062,124 @@
         ['restored pixel',      ctx.restoredPx, ORANGE],
       ],
     },
+
+    // ===== prompt-2 item 27 (long tail): additional selection types =====
+
+    {
+      label: '69-selection-mode-dropdown',
+      description: 'Selection mode dropdown present with 5 options; default is rect.',
+      run: async () => {},
+      assertions: (app) => [
+        ['dropdown present', !!app.q('#selection-mode'), true],
+        ['option count',     app.qa('#selection-mode option').length, 5],
+        ['default value',    app.q('#selection-mode').value, 'rect'],
+      ],
+    },
+
+    {
+      label: '70-single-pixel-selection',
+      description: 'In rect mode, click without drag → 1×1 selection at the click point; Delete clears only that pixel.',
+      run: async (app) => {
+        app.q('[data-tool="fill"]').click(); app.click(10, 10);   // fill ORANGE
+        app.q('[data-tool="select"]').click();
+        app.click(15, 15);                                         // click-without-drag
+        app.keyboard('Delete');
+      },
+      assertions: (app) => [
+        ['(15,15) cleared', app.pix(15, 15), TRANSPARENT],
+        ['(14,15) intact', app.pix(14, 15), ORANGE],
+        ['(16,15) intact', app.pix(16, 15), ORANGE],
+        ['(15,14) intact', app.pix(15, 14), ORANGE],
+        ['(15,16) intact', app.pix(15, 16), ORANGE],
+      ],
+    },
+
+    {
+      label: '71-row-selection',
+      description: 'Mode = row, click on (5,10) → whole row 10 selected; Delete clears the row.',
+      run: async (app) => {
+        app.q('[data-tool="fill"]').click(); app.click(10, 10);
+        app.q('[data-tool="select"]').click();
+        const sel = app.q('#selection-mode');
+        sel.value = 'row';
+        sel.dispatchEvent(new app.win.Event('change', { bubbles: true }));
+        app.click(5, 10);
+        app.keyboard('Delete');
+      },
+      assertions: (app) => [
+        ['(0,10) cleared',  app.pix(0, 10),  TRANSPARENT],
+        ['(15,10) cleared', app.pix(15, 10), TRANSPARENT],
+        ['(31,10) cleared', app.pix(31, 10), TRANSPARENT],
+        ['(5,9) intact',    app.pix(5, 9),   ORANGE],
+        ['(5,11) intact',   app.pix(5, 11),  ORANGE],
+      ],
+    },
+
+    {
+      label: '72-column-selection',
+      description: 'Mode = column, click on (10,5) → whole column 10 selected.',
+      run: async (app) => {
+        app.q('[data-tool="fill"]').click(); app.click(10, 10);
+        app.q('[data-tool="select"]').click();
+        const sel = app.q('#selection-mode');
+        sel.value = 'column';
+        sel.dispatchEvent(new app.win.Event('change', { bubbles: true }));
+        app.click(10, 5);
+        app.keyboard('Delete');
+      },
+      assertions: (app) => [
+        ['(10,0) cleared',  app.pix(10, 0),  TRANSPARENT],
+        ['(10,15) cleared', app.pix(10, 15), TRANSPARENT],
+        ['(10,31) cleared', app.pix(10, 31), TRANSPARENT],
+        ['(9,10) intact',   app.pix(9, 10),  ORANGE],
+        ['(11,10) intact',  app.pix(11, 10), ORANGE],
+      ],
+    },
+
+    {
+      label: '73-contiguous-color-selection',
+      description: 'Mode = contiguous, click inside the LEFT orange region → flood-fill selection of the left region only; right region untouched after Delete.',
+      run: async (app) => {
+        // Set up two disconnected ORANGE regions split by an erased column at x=15.
+        app.q('[data-tool="fill"]').click(); app.click(10, 10);
+        app.pressErase(); app.setThickness(1);
+        for (let y = 0; y < 32; y++) app.click(15, y);
+        app.q('[data-tool="select"]').click();
+        const sel = app.q('#selection-mode');
+        sel.value = 'contiguous';
+        sel.dispatchEvent(new app.win.Event('change', { bubbles: true }));
+        app.click(5, 5);                              // any pixel in LEFT region
+        app.keyboard('Delete');
+      },
+      assertions: (app) => [
+        ['(5,5) cleared (left region)',    app.pix(5, 5),    TRANSPARENT],
+        ['(0,0) cleared (left region)',    app.pix(0, 0),    TRANSPARENT],
+        ['(14,14) cleared (left region)',  app.pix(14, 14),  TRANSPARENT],
+        ['(16,16) intact (right region)',  app.pix(16, 16),  ORANGE],
+        ['(31,31) intact (right region)',  app.pix(31, 31),  ORANGE],
+      ],
+    },
+
+    {
+      label: '74-same-color-selection',
+      description: 'Mode = same-color, click on any ORANGE pixel → selects ALL ORANGE pixels regardless of connectivity; Delete clears both regions.',
+      run: async (app) => {
+        app.q('[data-tool="fill"]').click(); app.click(10, 10);
+        app.pressErase(); app.setThickness(1);
+        for (let y = 0; y < 32; y++) app.click(15, y);
+        app.q('[data-tool="select"]').click();
+        const sel = app.q('#selection-mode');
+        sel.value = 'same-color';
+        sel.dispatchEvent(new app.win.Event('change', { bubbles: true }));
+        app.click(5, 5);
+        app.keyboard('Delete');
+      },
+      assertions: (app) => [
+        ['(5,5) cleared (left)',     app.pix(5, 5),    TRANSPARENT],
+        ['(16,16) cleared (right)',  app.pix(16, 16),  TRANSPARENT],
+        ['(31,31) cleared (right)',  app.pix(31, 31),  TRANSPARENT],
+        ['(15,5) still empty',       app.pix(15, 5),   TRANSPARENT],
+      ],
+    },
   ];
 })();
