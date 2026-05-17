@@ -877,5 +877,82 @@
         ['undone (5,0) → BLACK',     ctx.restored, [0, 0, 0, 255]],
       ],
     },
+
+    // ===== prompt-2 item 27 (extension): Recolor selection =====
+
+    {
+      label: '58-fill-selection-button-exists',
+      description: 'Fill-selection button present in the toolbar.',
+      run: async () => {},
+      assertions: (app) => [
+        ['button exists', !!app.q('#btn-fill-selection'), true],
+      ],
+    },
+
+    {
+      label: '59-fill-selection-no-op-without-selection',
+      description: 'Clicking Fill Sel with no active selection is a safe no-op — canvas unchanged, no error.',
+      run: async (app) => {
+        app.click(5, 5);                         // paint something so there's a pixel to compare
+        const before = app.pix(5, 5);
+        app.q('#btn-fill-selection').click();
+        const after = app.pix(5, 5);
+        return { before, after };
+      },
+      assertions: (_app, ctx) => [
+        ['pixel unchanged', ctx.after, ctx.before],
+      ],
+    },
+
+    {
+      label: '60-fill-selection-recolors',
+      description: 'With a selection active, Fill Sel replaces every selected pixel with the current color; outside pixels are untouched.',
+      run: async (app) => {
+        app.q('[data-tool="select"]').click();
+        app.drag(5, 5, 7, 7);
+        app.pickSwatch(0);                       // BLACK
+        app.q('#btn-fill-selection').click();
+      },
+      assertions: (app) => [
+        ['(5,5) BLACK',  app.pix(5, 5), [0, 0, 0, 255]],
+        ['(6,6) BLACK',  app.pix(6, 6), [0, 0, 0, 255]],
+        ['(7,7) BLACK',  app.pix(7, 7), [0, 0, 0, 255]],
+        ['(4,5) clear',  app.pix(4, 5), TRANSPARENT],
+        ['(8,5) clear',  app.pix(8, 5), TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '61-keyboard-enter-fills-selection',
+      description: 'Enter key fills the selected region with the current color (same as the button).',
+      run: async (app) => {
+        app.q('[data-tool="select"]').click();
+        app.drag(5, 5, 7, 7);
+        app.pickSwatch(0);
+        app.keyboard('Enter');
+      },
+      assertions: (app) => [
+        ['(6,6) BLACK', app.pix(6, 6), [0, 0, 0, 255]],
+      ],
+    },
+
+    {
+      label: '62-fill-selection-undoable',
+      description: 'Undo after Fill Sel restores the pre-fill pixels (TRANSPARENT in this scenario).',
+      run: async (app) => {
+        app.q('[data-tool="select"]').click();
+        app.drag(5, 5, 7, 7);
+        app.pickSwatch(0);
+        app.q('#btn-fill-selection').click();
+        const after = app.pix(6, 6);
+        app.pressUndo();
+        const restored = app.pix(6, 6);
+        return { after, restored };
+      },
+      assertions: (_app, ctx) => [
+        ['recoloured BLACK',   ctx.after,    [0, 0, 0, 255]],
+        ['undone TRANSPARENT', ctx.restored, TRANSPARENT],
+      ],
+    },
   ];
 })();
