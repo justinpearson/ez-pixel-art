@@ -20,7 +20,8 @@ body { display: flex; flex-direction: column; }
   border-bottom: 1px solid #ddd;
   flex-shrink: 0;
 }
-.brand { font-weight: 600; font-size: 15px; margin-right: 4px; }
+.brand { font-weight: 600; font-size: 15px; margin-right: 4px; color: inherit; text-decoration: none; }
+.brand:hover { text-decoration: underline; }
 #toolbar .group { display: flex; align-items: center; gap: 4px; }
 #toolbar button,
 #toolbar select {

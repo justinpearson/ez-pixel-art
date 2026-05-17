@@ -18,7 +18,9 @@ then open `http://localhost:8000/`. The `.claude/launch.json` config "ez-pixel-a
 
 ## Regression tests
 
-A pure-browser harness at `tests/index.html` loads the app in an iframe and runs scenario scripts against it. Open `http://localhost:8000/tests/` (or `open tests/index.html`) — it auto-runs on load and renders a pass/fail table with per-scenario canvas snapshots. Scenarios live in `tests/scenarios.js` as plain data (`{ label, description, chain?, run, assertions }`); add a new scenario by appending to that array — no harness changes needed. The `App` class in `tests/runner.js` is the seam for user actions (`click`, `drag`, `setAlpha`, `pressUndo`, etc.).
+A pure-browser harness at `tests/index.html` loads the app in an iframe and runs scenario scripts against it. **Must be loaded over HTTP** (not `file://`) because the runner fetches `../index.html` to cache-bust child scripts and browsers block that across a null origin. With the python server running, visit `http://localhost:8000/tests/`. The page auto-runs on load and renders a pass/fail table with per-scenario canvas snapshots.
+
+Scenarios live in `tests/scenarios.js` as plain data (`{ label, description, chain?, run, assertions }`); add a new scenario by appending to that array — no harness changes needed. The `App` class in `tests/runner.js` is the seam for user actions (`click`, `drag`, `setAlpha`, `pressUndo`, etc.). If you open the harness from `file://` it shows a clear error instead of failing every test.
 
 If you change `app.js` and the tests don't seem to reflect it, hard-reload the tests page (Cmd-Shift-R) — the iframe's HTML is cache-busted on each scenario but child scripts may still come from cache.
 

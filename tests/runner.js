@@ -277,6 +277,28 @@
   // ---------- Boot ----------
   window.addEventListener('load', () => {
     document.getElementById('run').addEventListener('click', runAll);
+    // The runner fetches ../index.html to cache-bust the app's child scripts,
+    // which browsers block from file:// origins (CORS / opaque origin). Fail
+    // loud and helpful rather than producing 60 confusing "fetch failed" rows.
+    if (location.protocol === 'file:') {
+      const summaryEl = document.getElementById('summary');
+      summaryEl.className = 'fail';
+      summaryEl.textContent = 'Run over HTTP — file:// is blocked';
+      const tbody = document.querySelector('#results tbody');
+      const tr = document.createElement('tr');
+      tr.className = 'fail';
+      const td = document.createElement('td');
+      td.colSpan = 5;
+      td.innerHTML =
+        '<div class="error">Open this page over HTTP, not <code>file://</code>. ' +
+        'With the bundled preview server running, visit ' +
+        '<code>http://localhost:8000/tests/</code>. ' +
+        'Start the server from the repo root with:<br>' +
+        '<code>python3 -m http.server 8000</code></div>';
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
+    }
     runAll();
   });
 })();
