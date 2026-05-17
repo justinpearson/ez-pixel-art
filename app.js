@@ -72,6 +72,9 @@
     resizeGridCanvas.width  = w;
     resizeGridCanvas.height = h;
     artCtx.imageSmoothingEnabled = false;
+    // The selection mask is sized to the old canvas; dropping it on any
+    // dimension change keeps subsequent operations safe.
+    if (selection && selection.mask.length !== w * h) selection = null;
     applyZoom();
   }
   function applyZoom() {
@@ -313,36 +316,55 @@
       cursor: 'crosshair',
       start: null,
       onDown(p) {
-        // Starting a new drag abandons any prior committed selection.
-        this.start = p;
-        selection = null;
-        clearSelectionOverlay();
+        const mode = $('#selection-mode').value;
+        if (mode === 'rect') {
+          // Rect waits for the drag to complete.
+          this.start = p;
+          selection = null;
+          clearSelectionOverlay();
+          return;
+        }
+        // All other modes commit immediately on click — they don't need a drag.
+        let mask = null;
+        if      (mode === 'row')        mask = buildRowMask(p.y);
+        else if (mode === 'column')     mask = buildColumnMask(p.x);
+        else if (mode === 'contiguous') mask = buildContiguousMask(p.x, p.y);
+        else if (mode === 'same-color') mask = buildSameColorMask(p.x, p.y);
+        if (mask) {
+          selection = { mask };
+          drawSelectionFromMask();
+        }
       },
       onMove(p) {
         if (!this.start) return;
+        // onMove only matters for rect mode — non-rect modes commit in onDown
+        // and don't set this.start, so this guard short-circuits them.
         const minX = Math.min(this.start.x, p.x), maxX = Math.max(this.start.x, p.x);
         const minY = Math.min(this.start.y, p.y), maxY = Math.max(this.start.y, p.y);
         clearSelectionOverlay();
-        drawSelectionOutline(minX, minY, maxX, maxY);
+        for (let y = minY; y <= maxY; y++) {
+          for (let x = minX; x <= maxX; x++) {
+            if (x === minX || x === maxX || y === minY || y === maxY) {
+              paintPixel(x, y, selectionCtx, SELECTION_COLOR);
+            }
+          }
+        }
       },
       onUp(p) {
         if (!this.start) return;
         const minX = Math.min(this.start.x, p.x), maxX = Math.max(this.start.x, p.x);
         const minY = Math.min(this.start.y, p.y), maxY = Math.max(this.start.y, p.y);
-        selection = { minX, minY, maxX, maxY };
-        clearSelectionOverlay();
-        drawSelectionOutline(minX, minY, maxX, maxY);
+        selection = { mask: buildRectMask(minX, minY, maxX, maxY) };
+        drawSelectionFromMask();
         this.start = null;
       },
       onCancel() {
-        // Abandons an in-progress drag. The committed selection (if any) is
-        // dismissed by the global Esc handler, not here, so cancelling a drag
+        // Only abandons an in-progress rect drag. The committed selection (if
+        // any) is dismissed by the global Esc handler — cancelling a drag
         // doesn't accidentally wipe a prior selection the user is keeping.
         if (this.start) {
           this.start = null;
-          clearSelectionOverlay();
-          if (selection) drawSelectionOutline(
-            selection.minX, selection.minY, selection.maxX, selection.maxY);
+          drawSelectionFromMask();
         }
       },
     },
@@ -624,7 +646,10 @@
   // ---------- Selection ----------
   // selection is global (persists across tool switches) so the user can make
   // a selection then switch to Pencil etc. without losing it. Esc dismisses.
-  let selection = null;  // null or { minX, minY, maxX, maxY }
+  // Internally it's a per-pixel mask (Uint8Array of length imgW*imgH); 1 means
+  // selected. This shape supports rectangular, row, column, contiguous, and
+  // same-color selections uniformly.
+  let selection = null;  // null or { mask: Uint8Array }
   const SELECTION_COLOR = [80, 140, 240, 220];
 
   function clearSelectionOverlay() {
@@ -634,43 +659,100 @@
     selection = null;
     clearSelectionOverlay();
   }
-  function drawSelectionOutline(minX, minY, maxX, maxY) {
-    for (let y = minY; y <= maxY; y++) {
-      for (let x = minX; x <= maxX; x++) {
-        if (x === minX || x === maxX || y === minY || y === maxY) {
+  function buildRectMask(minX, minY, maxX, maxY) {
+    const m = new Uint8Array(imgW * imgH);
+    for (let y = minY; y <= maxY; y++)
+      for (let x = minX; x <= maxX; x++)
+        m[y * imgW + x] = 1;
+    return m;
+  }
+  function buildRowMask(y) {
+    const m = new Uint8Array(imgW * imgH);
+    if (y < 0 || y >= imgH) return m;
+    for (let x = 0; x < imgW; x++) m[y * imgW + x] = 1;
+    return m;
+  }
+  function buildColumnMask(x) {
+    const m = new Uint8Array(imgW * imgH);
+    if (x < 0 || x >= imgW) return m;
+    for (let y = 0; y < imgH; y++) m[y * imgW + x] = 1;
+    return m;
+  }
+  function buildContiguousMask(sx, sy) {
+    const id = artCtx.getImageData(0, 0, imgW, imgH);
+    const d  = id.data;
+    const si = (sy * imgW + sx) * 4;
+    const tr = d[si], tg = d[si+1], tb = d[si+2], ta = d[si+3];
+    const m = new Uint8Array(imgW * imgH);
+    const stack = [sx, sy];
+    while (stack.length) {
+      const y = stack.pop(), x = stack.pop();
+      if (x < 0 || y < 0 || x >= imgW || y >= imgH) continue;
+      const idx = y * imgW + x;
+      if (m[idx]) continue;
+      const i = idx * 4;
+      if (d[i] !== tr || d[i+1] !== tg || d[i+2] !== tb || d[i+3] !== ta) continue;
+      m[idx] = 1;
+      stack.push(x + 1, y, x - 1, y, x, y + 1, x, y - 1);
+    }
+    return m;
+  }
+  function buildSameColorMask(sx, sy) {
+    const id = artCtx.getImageData(0, 0, imgW, imgH);
+    const d  = id.data;
+    const si = (sy * imgW + sx) * 4;
+    const tr = d[si], tg = d[si+1], tb = d[si+2], ta = d[si+3];
+    const m = new Uint8Array(imgW * imgH);
+    for (let y = 0; y < imgH; y++) {
+      for (let x = 0; x < imgW; x++) {
+        const idx = y * imgW + x;
+        const i = idx * 4;
+        if (d[i] === tr && d[i+1] === tg && d[i+2] === tb && d[i+3] === ta) {
+          m[idx] = 1;
+        }
+      }
+    }
+    return m;
+  }
+  function drawSelectionFromMask() {
+    clearSelectionOverlay();
+    if (!selection) return;
+    const m = selection.mask;
+    // Contour pass: any selected pixel with at least one non-selected neighbour
+    // (incl. out-of-bounds) is on the outline. For a solid rect this yields
+    // the border; for irregular shapes it traces them naturally.
+    for (let y = 0; y < imgH; y++) {
+      for (let x = 0; x < imgW; x++) {
+        if (!m[y * imgW + x]) continue;
+        const top = y > 0           ? m[(y - 1) * imgW + x] : 0;
+        const bot = y < imgH - 1    ? m[(y + 1) * imgW + x] : 0;
+        const lef = x > 0           ? m[y * imgW + (x - 1)] : 0;
+        const rig = x < imgW - 1    ? m[y * imgW + (x + 1)] : 0;
+        if (!top || !bot || !lef || !rig) {
           paintPixel(x, y, selectionCtx, SELECTION_COLOR);
         }
       }
     }
   }
-  function deleteSelection() {
+  function applyToSelection(fn) {
     if (!selection) return;
     pushUndo();
     const id = artCtx.getImageData(0, 0, imgW, imgH);
     const d  = id.data;
-    for (let y = selection.minY; y <= selection.maxY; y++) {
-      for (let x = selection.minX; x <= selection.maxX; x++) {
-        const i = (y * imgW + x) * 4;
-        d[i] = 0; d[i + 1] = 0; d[i + 2] = 0; d[i + 3] = 0;
-      }
+    const m  = selection.mask;
+    for (let idx = 0; idx < m.length; idx++) {
+      if (!m[idx]) continue;
+      fn(d, idx * 4);
     }
     artCtx.putImageData(id, 0, 0);
     if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
   }
+  function deleteSelection() {
+    applyToSelection((d, i) => { d[i] = 0; d[i+1] = 0; d[i+2] = 0; d[i+3] = 0; });
+  }
   function recolorSelection() {
-    if (!selection) return;
-    pushUndo();
-    const id = artCtx.getImageData(0, 0, imgW, imgH);
-    const d  = id.data;
     const [r, g, b, a] = currentColor;
-    for (let y = selection.minY; y <= selection.maxY; y++) {
-      for (let x = selection.minX; x <= selection.maxX; x++) {
-        const i = (y * imgW + x) * 4;
-        d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = a;
-      }
-    }
-    artCtx.putImageData(id, 0, 0);
-    if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
+    applyToSelection((d, i) => { d[i] = r; d[i+1] = g; d[i+2] = b; d[i+3] = a; });
   }
 
   // ---------- Alpha-as-grayscale preview ----------

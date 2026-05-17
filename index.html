@@ -35,6 +35,18 @@
       <label class="check"><input type="checkbox" id="rect-filled" /> Filled</label>
     </div>
 
+    <div class="group" id="select-options">
+      <label>Selection
+        <select id="selection-mode" title="How the Select tool interprets clicks/drags">
+          <option value="rect">Rectangle</option>
+          <option value="row">Row</option>
+          <option value="column">Column</option>
+          <option value="contiguous">Contiguous color</option>
+          <option value="same-color">Same color</option>
+        </select>
+      </label>
+    </div>
+
     <div class="group">
       <button id="btn-undo" title="Undo (U, Cmd/Ctrl+Z)"><b>U</b>ndo</button>
       <button id="btn-redo" title="Redo (Cmd/Ctrl+Shift+Z)">Redo</button>
