@@ -96,6 +96,21 @@
     pressRedo()          { this.q('#btn-redo').click(); }
     toggleAlphaPreview()    { this.q('#alpha-preview').click(); }
     toggleDistinctPreview() { this.q('#distinct-preview').click(); }
+    expandQuant() {
+      if (this.q('#quant-body').classList.contains('hidden')) this.q('#btn-quant-toggle').click();
+    }
+    collapseQuant() {
+      if (!this.q('#quant-body').classList.contains('hidden')) this.q('#btn-quant-toggle').click();
+    }
+    pickKmeansK(k) {
+      const row = this.q(`#kmeans-table tbody tr[data-k="${k}"]`);
+      row.querySelector('input[type=radio]').click();
+    }
+    setKmeansSnap(on) {
+      const cb = this.q('#kmeans-snap');
+      if (cb.checked !== !!on) cb.click();
+    }
+    pressQuantize() { this.q('#btn-quantize').click(); }
     keyboard(key) {
       this.doc.body.dispatchEvent(new this.win.KeyboardEvent('keydown', {
         key, bubbles: true,

@@ -117,6 +117,175 @@ body { display: flex; flex-direction: column; }
   text-align: right;
 }
 
+/* ---------- Color Quantization panel ---------- */
+#quant-panel {
+  flex-shrink: 0;
+  background: #fafafa;
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  flex-direction: column;
+  max-height: 60vh;
+}
+#quant-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 12px;
+  background: #f3f3f3;
+  border-bottom: 1px solid #e5e5e5;
+}
+.quant-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  color: inherit;
+}
+.quant-toggle:hover { background: #ececec; border-radius: 4px; }
+.quant-toggle .caret {
+  display: inline-block;
+  font-size: 10px;
+  color: #888;
+  transition: transform 0.12s ease;
+}
+.quant-toggle[aria-expanded="true"] .caret { transform: rotate(90deg); }
+#quant-summary { color: #666; font-size: 12px; }
+#quant-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+.quant-section {
+  padding: 8px 12px;
+  border-bottom: 1px solid #ececec;
+}
+.quant-section:last-of-type { border-bottom: none; }
+.quant-section h4 {
+  margin: 0;
+  font-size: 13px;
+  color: #333;
+}
+.quant-section-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 6px;
+}
+#kmeans-table,
+#pixel-sets-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+#kmeans-table th,
+#kmeans-table td,
+#pixel-sets-table th,
+#pixel-sets-table td {
+  padding: 4px 10px;
+  text-align: left;
+  border-bottom: 1px solid #ececec;
+  white-space: nowrap;
+}
+#kmeans-table thead th,
+#pixel-sets-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f3f3f3;
+  color: #555;
+  font-weight: 600;
+  border-bottom: 1px solid #ddd;
+}
+#kmeans-table tbody tr { cursor: pointer; }
+#kmeans-table tbody tr:hover { background: #f0f6ff; }
+#kmeans-table tbody tr.is-selected { background: #d6e6ff; }
+#kmeans-table .km-colors {
+  display: inline-flex;
+  gap: 2px;
+  vertical-align: middle;
+}
+#kmeans-table .km-colors .qcolor,
+.qcolor {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 1px solid #888;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+#pixel-sets-table tbody tr.is-quantized { background: #f5faff; }
+#pixel-sets-table .ps-index {
+  color: #888;
+  font-variant-numeric: tabular-nums;
+}
+#pixel-sets-table .ps-swatch {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border: 1px solid #888;
+  border-radius: 2px;
+  vertical-align: middle;
+  background:
+    linear-gradient(var(--swatch-color, transparent), var(--swatch-color, transparent)),
+    conic-gradient(#ccc 25%, #fff 0 50%, #ccc 0 75%, #fff 0);
+  background-size: auto, 6px 6px;
+}
+#pixel-sets-table .ps-rgba { color: #444; font-size: 12px; }
+#pixel-sets-table .ps-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+#pixel-sets-table .ps-target select {
+  font: inherit;
+  padding: 2px 4px;
+}
+#kmeans-table button,
+#pixel-sets-table button {
+  padding: 2px 8px;
+  font: inherit;
+  background: #fff;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#kmeans-table button:hover,
+#pixel-sets-table button:hover { background: #eef; }
+#pixel-sets-table tr.is-quantized td.ps-color-cell::before {
+  content: "★ ";
+  color: #4a8dff;
+}
+#quant-actions {
+  padding: 8px 12px;
+  background: #f3f3f3;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+#quant-actions #btn-quantize {
+  padding: 5px 14px;
+  font: inherit;
+  background: #4a8dff;
+  color: #fff;
+  border: 1px solid #2a6de0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#quant-actions #btn-quantize:hover { background: #3a7dee; }
+#quant-actions #btn-quantize:disabled {
+  background: #ccc;
+  border-color: #aaa;
+  cursor: not-allowed;
+}
+#quant-body.hidden { display: none; }
+.quant-empty { color: #888; font-style: italic; padding: 4px 0; }
+
 /* ---------- Canvas area ---------- */
 main { flex: 1; min-height: 0; }
 #canvas-wrap {

@@ -91,13 +91,65 @@
       <div id="palette" title="Click swatch to use · right-click to remove"></div>
     </div>
 
-    <div class="group" id="palette-ops">
-      <label>Max colors <input type="number" id="quantize-n" min="1" max="64" value="16" /></label>
-      <button id="btn-quantize" title="Squash image to the N most-common colors; replaces palette with the kept colors">Quantize</button>
-    </div>
-
     <span id="status"></span>
   </header>
+
+  <section id="quant-panel">
+    <header id="quant-header">
+      <button id="btn-quant-toggle" type="button" class="quant-toggle" aria-expanded="false" title="Show / hide the Color Quantization panel">
+        <span class="caret">▶</span>
+        <span class="quant-title">Color Quantization</span>
+      </button>
+      <span id="quant-summary"></span>
+    </header>
+    <div id="quant-body" class="hidden">
+      <div class="quant-section" id="quant-kmeans-section">
+        <div class="quant-section-header">
+          <h4>K-means clusters (LAB color space)</h4>
+          <label class="check" title="Checked: each proposed cluster color is snapped to the closest existing pixel-set, preserving real image colors and alpha. Unchecked: the raw cluster centroid color is used (synthetic, alpha forced to 255).">
+            <input type="checkbox" id="kmeans-snap" checked />
+            Snap centroids to closest pixel-set
+          </label>
+        </div>
+        <table id="kmeans-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>k</th>
+              <th title="Root-mean-square LAB distance per pixel from its cluster centroid. Lower = better fit.">Mean ΔE / px</th>
+              <th>Proposed colors</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="quant-section" id="quant-pixelsets-section">
+        <div class="quant-section-header">
+          <h4>Pixel sets</h4>
+          <span id="pixel-sets-summary"></span>
+        </div>
+        <div id="pixel-sets-table-wrap">
+          <table id="pixel-sets-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Color</th>
+                <th>RGBA</th>
+                <th>Count</th>
+                <th>Select</th>
+                <th>Replace with</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="quant-actions">
+        <button id="btn-quantize" title="Apply every row's chosen replacement in one atomic pass.">Quantize (apply all replacements)</button>
+      </div>
+    </div>
+  </section>
 
   <main>
     <div id="canvas-wrap">
