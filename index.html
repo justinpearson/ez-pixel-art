@@ -74,6 +74,7 @@
       <button id="btn-zoom-in" title="Zoom in (+)">+</button>
       <label class="check"><input type="checkbox" id="grid-toggle" /> <b>G</b>rid</label>
       <label class="check"><input type="checkbox" id="alpha-preview" /> α preview</label>
+      <label class="check" title="Recolor each distinct RGBA in the image with a high-contrast hue so similar colors are easy to tell apart. View-only — does not edit the image."><input type="checkbox" id="distinct-preview" /> distinct colors</label>
     </div>
 
     <div class="group" id="color-section">
@@ -103,6 +104,7 @@
       <div id="canvas-stage" class="checker">
         <canvas id="art"></canvas>
         <canvas id="art-alpha-preview" class="hidden"></canvas>
+        <canvas id="art-distinct-preview" class="hidden"></canvas>
         <canvas id="hover-overlay"></canvas>
         <canvas id="selection-overlay"></canvas>
         <canvas id="resize-grid-overlay"></canvas>

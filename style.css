@@ -142,13 +142,14 @@ main { flex: 1; min-height: 0; }
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
-#art, #art-alpha-preview {
+#art, #art-alpha-preview, #art-distinct-preview {
   display: block;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
 #art { cursor: cell; }
-#art-alpha-preview {
+#art-alpha-preview,
+#art-distinct-preview {
   position: absolute;
   top: 0;
   left: 0;

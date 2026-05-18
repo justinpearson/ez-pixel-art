@@ -184,6 +184,87 @@
     },
 
     {
+      label: '13a-distinct-preview-on',
+      description: 'Paint three different colors plus a repeat, toggle distinct-colors preview ON — each unique RGBA maps to a high-contrast hue, repeats reuse the same hue, α=0 pixels stay transparent.',
+      run: async (app) => {
+        // Three visually-similar colors via the color picker + one repeat.
+        const setHex = (h) => {
+          const p = app.q('#current-color');
+          p.value = h;
+          p.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        };
+        setHex('#ff0000'); app.click(2, 2);            // unique #1
+        setHex('#ff0001'); app.click(4, 4);            // unique #2 (near-identical)
+        setHex('#ff0002'); app.click(6, 6);            // unique #3
+        setHex('#ff0000'); app.click(8, 8);            // repeat of #1
+        app.toggleDistinctPreview();
+      },
+      assertions: (app) => [
+        ['art hidden',                          app.canvas.classList.contains('hidden'),                          true],
+        ['distinct preview visible',            !app.q('#art-distinct-preview').classList.contains('hidden'),     true],
+        ['distinct (2,2) palette[0] red',       app.distinctPix(2, 2),                                            [255, 0, 0, 255]],
+        ['distinct (4,4) palette[1] green',     app.distinctPix(4, 4),                                            [0, 200, 0, 255]],
+        ['distinct (6,6) palette[2] blue',      app.distinctPix(6, 6),                                            [0, 0, 255, 255]],
+        ['distinct (8,8) reuses palette[0]',    app.distinctPix(8, 8),                                            [255, 0, 0, 255]],
+        ['distinct (0,0) blank stays clear',    app.distinctPix(0, 0),                                            [0, 0, 0, 0]],
+      ],
+    },
+
+    {
+      label: '13b-distinct-preview-off',
+      description: 'Toggle distinct-colors preview OFF — normal view returns.',
+      chain: true,
+      run: async (app) => { app.toggleDistinctPreview(); },
+      assertions: (app) => [
+        ['art visible',                  !app.canvas.classList.contains('hidden'),                          true],
+        ['distinct preview hidden',      app.q('#art-distinct-preview').classList.contains('hidden'),       true],
+      ],
+    },
+
+    {
+      label: '13c-previews-mutually-exclusive',
+      description: 'α preview and distinct preview cannot both be on — flipping one on flips the other off and unchecks its box.',
+      run: async (app) => {
+        app.click(4, 4);                                  // one opaque pixel
+        app.toggleAlphaPreview();                         // alpha ON
+        const after1 = {
+          alphaOn:    !app.q('#art-alpha-preview').classList.contains('hidden'),
+          distinctOn: !app.q('#art-distinct-preview').classList.contains('hidden'),
+          alphaChecked:    app.q('#alpha-preview').checked,
+          distinctChecked: app.q('#distinct-preview').checked,
+        };
+        app.toggleDistinctPreview();                      // distinct ON → alpha forced OFF
+        const after2 = {
+          alphaOn:    !app.q('#art-alpha-preview').classList.contains('hidden'),
+          distinctOn: !app.q('#art-distinct-preview').classList.contains('hidden'),
+          alphaChecked:    app.q('#alpha-preview').checked,
+          distinctChecked: app.q('#distinct-preview').checked,
+        };
+        app.toggleAlphaPreview();                         // alpha ON → distinct forced OFF
+        const after3 = {
+          alphaOn:    !app.q('#art-alpha-preview').classList.contains('hidden'),
+          distinctOn: !app.q('#art-distinct-preview').classList.contains('hidden'),
+          alphaChecked:    app.q('#alpha-preview').checked,
+          distinctChecked: app.q('#distinct-preview').checked,
+        };
+        app.toggleAlphaPreview();                         // tidy up
+        return { after1, after2, after3 };
+      },
+      assertions: (_app, ctx) => [
+        ['1: alpha on',                  ctx.after1.alphaOn,         true],
+        ['1: distinct off',              ctx.after1.distinctOn,      false],
+        ['1: alpha box checked',         ctx.after1.alphaChecked,    true],
+        ['2: distinct on',               ctx.after2.distinctOn,      true],
+        ['2: alpha off',                 ctx.after2.alphaOn,         false],
+        ['2: alpha box unchecked',       ctx.after2.alphaChecked,    false],
+        ['2: distinct box checked',      ctx.after2.distinctChecked, true],
+        ['3: alpha on',                  ctx.after3.alphaOn,         true],
+        ['3: distinct off',              ctx.after3.distinctOn,      false],
+        ['3: distinct box unchecked',    ctx.after3.distinctChecked, false],
+      ],
+    },
+
+    {
       label: '14-cursor',
       description: 'setTool uses tool-defined cursor: Picker → crosshair, Pencil → cell.',
       run: async (app) => {

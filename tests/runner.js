@@ -26,6 +26,10 @@
       const c = this.q('#art-alpha-preview');
       return Array.from(c.getContext('2d').getImageData(x, y, 1, 1).data);
     }
+    distinctPix(x, y) {
+      const c = this.q('#art-distinct-preview');
+      return Array.from(c.getContext('2d').getImageData(x, y, 1, 1).data);
+    }
     overlayPix(x, y) {
       const c = this.q('#hover-overlay');
       return Array.from(c.getContext('2d').getImageData(x, y, 1, 1).data);
@@ -90,7 +94,8 @@
     pressErase()         { this.q('#btn-eraser').click(); }
     pressUndo()          { this.q('#btn-undo').click(); }
     pressRedo()          { this.q('#btn-redo').click(); }
-    toggleAlphaPreview() { this.q('#alpha-preview').click(); }
+    toggleAlphaPreview()    { this.q('#alpha-preview').click(); }
+    toggleDistinctPreview() { this.q('#distinct-preview').click(); }
     keyboard(key) {
       this.doc.body.dispatchEvent(new this.win.KeyboardEvent('keydown', {
         key, bubbles: true,
@@ -98,8 +103,11 @@
     }
 
     canvasDataURL() {
-      const previewOn = !this.q('#art-alpha-preview').classList.contains('hidden');
-      const c = previewOn ? this.q('#art-alpha-preview') : this.canvas;
+      const alphaOn    = !this.q('#art-alpha-preview').classList.contains('hidden');
+      const distinctOn = !this.q('#art-distinct-preview').classList.contains('hidden');
+      const c = distinctOn ? this.q('#art-distinct-preview')
+              : alphaOn    ? this.q('#art-alpha-preview')
+                           : this.canvas;
       return c.toDataURL('image/png');
     }
   }

@@ -9,6 +9,8 @@
   const artCtx        = artCanvas.getContext('2d', { willReadFrequently: true });
   const previewCanvas = $('#art-alpha-preview');
   const previewCtx    = previewCanvas.getContext('2d');
+  const distinctCanvas = $('#art-distinct-preview');
+  const distinctCtx    = distinctCanvas.getContext('2d');
   const hoverCanvas   = $('#hover-overlay');
   const hoverCtx      = hoverCanvas.getContext('2d');
   const selectionCanvas = $('#selection-overlay');
@@ -65,6 +67,8 @@
     artCanvas.height = h;
     previewCanvas.width  = w;
     previewCanvas.height = h;
+    distinctCanvas.width  = w;
+    distinctCanvas.height = h;
     hoverCanvas.width    = w;
     hoverCanvas.height   = h;
     selectionCanvas.width  = w;
@@ -84,6 +88,8 @@
     artCanvas.style.height = cssH + 'px';
     previewCanvas.style.width  = cssW + 'px';
     previewCanvas.style.height = cssH + 'px';
+    distinctCanvas.style.width  = cssW + 'px';
+    distinctCanvas.style.height = cssH + 'px';
     hoverCanvas.style.width    = cssW + 'px';
     hoverCanvas.style.height   = cssH + 'px';
     selectionCanvas.style.width  = cssW + 'px';
@@ -387,7 +393,7 @@
   function restore(snap) {
     setCanvasSize(snap.width, snap.height);
     artCtx.putImageData(snap, 0, 0);
-    if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
+    refreshPreviews();
   }
   function pushUndoSnap(snap) {
     undoStack.push(snap);
@@ -574,7 +580,7 @@
     artCtx.putImageData(id, 0, 0);
     palette = top.map(rgbaToHex);
     renderPalette();
-    if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
+    refreshPreviews();
   }
   function getQuantizeN() {
     const n = parseInt($('#quantize-n').value, 10);
@@ -745,7 +751,7 @@
       fn(d, idx * 4);
     }
     artCtx.putImageData(id, 0, 0);
-    if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
+    refreshPreviews();
   }
   function deleteSelection() {
     applyToSelection((d, i) => { d[i] = 0; d[i+1] = 0; d[i+2] = 0; d[i+3] = 0; });
@@ -771,6 +777,12 @@
   }
   function setAlphaPreview(on) {
     if (on) {
+      // The two previews replace the art view, so only one can be visible at a
+      // time — flipping one on flips the other off.
+      if (!distinctCanvas.classList.contains('hidden')) {
+        $('#distinct-preview').checked = false;
+        setDistinctPreview(false);
+      }
       refreshAlphaPreview();
       previewCanvas.classList.remove('hidden');
       artCanvas.classList.add('hidden');
@@ -778,6 +790,61 @@
       previewCanvas.classList.add('hidden');
       artCanvas.classList.remove('hidden');
     }
+  }
+
+  // ---------- Distinct-colors preview ----------
+  // High-contrast palette assigned in scan-order: the first unique RGBA
+  // encountered becomes red, the second green, etc. Fully-transparent pixels
+  // stay transparent so blank regions remain visible. Cycles past the palette
+  // length if the image has more unique colors.
+  const DISTINCT_PALETTE = [
+    [255,   0,   0], [  0, 200,   0], [  0,   0, 255], [255, 220,   0],
+    [255,   0, 255], [  0, 220, 220], [255, 140,   0], [140,   0, 255],
+    [  0, 140, 255], [140, 255,   0], [255,   0, 140], [  0, 255, 140],
+    [140,   0,   0], [  0, 100,   0], [  0,   0, 140], [140, 140,   0],
+    [140,   0, 140], [  0, 140, 140], [255, 255, 255], [120, 120, 120],
+    [255, 180, 200], [165,  80,  40], [200, 220, 100], [ 60,   0, 120],
+  ];
+  function refreshDistinctPreview() {
+    const src = artCtx.getImageData(0, 0, imgW, imgH);
+    const out = distinctCtx.createImageData(imgW, imgH);
+    const indexByKey = new Map();
+    for (let i = 0; i < src.data.length; i += 4) {
+      const a = src.data[i + 3];
+      if (a === 0) continue;
+      const key = (src.data[i] << 24) | (src.data[i+1] << 16) | (src.data[i+2] << 8) | a;
+      let idx = indexByKey.get(key);
+      if (idx === undefined) {
+        idx = indexByKey.size;
+        indexByKey.set(key, idx);
+      }
+      const [pr, pg, pb] = DISTINCT_PALETTE[idx % DISTINCT_PALETTE.length];
+      out.data[i] = pr;
+      out.data[i + 1] = pg;
+      out.data[i + 2] = pb;
+      out.data[i + 3] = 255;
+    }
+    distinctCtx.putImageData(out, 0, 0);
+  }
+  function setDistinctPreview(on) {
+    if (on) {
+      if (!previewCanvas.classList.contains('hidden')) {
+        $('#alpha-preview').checked = false;
+        setAlphaPreview(false);
+      }
+      refreshDistinctPreview();
+      distinctCanvas.classList.remove('hidden');
+      artCanvas.classList.add('hidden');
+    } else {
+      distinctCanvas.classList.add('hidden');
+      artCanvas.classList.remove('hidden');
+    }
+  }
+
+  // Re-render whichever preview is currently visible after a canvas mutation.
+  function refreshPreviews() {
+    if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
+    if (!distinctCanvas.classList.contains('hidden')) refreshDistinctPreview();
   }
 
   // ---------- Status ----------
@@ -846,6 +913,7 @@
   $('#btn-zoom-out').addEventListener('click', () => { zoom = Math.max(MIN_ZOOM, zoom - 1); applyZoom(); });
   $('#grid-toggle').addEventListener('change', (e) => gridOverlay.classList.toggle('hidden', !e.target.checked));
   $('#alpha-preview').addEventListener('change', (e) => setAlphaPreview(e.target.checked));
+  $('#distinct-preview').addEventListener('change', (e) => setDistinctPreview(e.target.checked));
   $('#btn-save').addEventListener('click', () => saveImage($('#save-format').value));
   $('#btn-quantize').addEventListener('click', () => quantize(getQuantizeN()));
   $('#btn-fill-selection').addEventListener('click', recolorSelection);
