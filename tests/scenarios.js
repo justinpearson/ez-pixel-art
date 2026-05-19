@@ -5,6 +5,22 @@
   const ORANGE_128   = [203, 110, 74, 128];
   const TRANSPARENT  = [0, 0, 0, 0];
 
+  // Helper used by the Color-Quantization scenarios: dropdown option *values*
+  // are cluster indices, not color keys, so we look up the right option by
+  // its visible RGBA label to keep the tests color-centric.
+  const pickDropdownByRgba = (row, win, rgba) => {
+    const sel = row.querySelector('select');
+    const target = `rgba(${rgba.join(', ')})`;
+    for (const opt of sel.options) {
+      if (opt.textContent.endsWith(target)) {
+        sel.value = opt.value;
+        sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+        return true;
+      }
+    }
+    return false;
+  };
+
   window.scenarios = [
     {
       label: '01-initial',
@@ -180,6 +196,87 @@
       assertions: (app) => [
         ['art visible',           !app.canvas.classList.contains('hidden'),                       true],
         ['preview hidden',        app.q('#art-alpha-preview').classList.contains('hidden'),       true],
+      ],
+    },
+
+    {
+      label: '13a-distinct-preview-on',
+      description: 'Paint three different colors plus a repeat, toggle distinct-colors preview ON — each unique RGBA maps to a high-contrast hue, repeats reuse the same hue, α=0 pixels stay transparent.',
+      run: async (app) => {
+        // Three visually-similar colors via the color picker + one repeat.
+        const setHex = (h) => {
+          const p = app.q('#current-color');
+          p.value = h;
+          p.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        };
+        setHex('#ff0000'); app.click(2, 2);            // unique #1
+        setHex('#ff0001'); app.click(4, 4);            // unique #2 (near-identical)
+        setHex('#ff0002'); app.click(6, 6);            // unique #3
+        setHex('#ff0000'); app.click(8, 8);            // repeat of #1
+        app.toggleDistinctPreview();
+      },
+      assertions: (app) => [
+        ['art hidden',                          app.canvas.classList.contains('hidden'),                          true],
+        ['distinct preview visible',            !app.q('#art-distinct-preview').classList.contains('hidden'),     true],
+        ['distinct (2,2) palette[0] red',       app.distinctPix(2, 2),                                            [255, 0, 0, 255]],
+        ['distinct (4,4) palette[1] green',     app.distinctPix(4, 4),                                            [0, 200, 0, 255]],
+        ['distinct (6,6) palette[2] blue',      app.distinctPix(6, 6),                                            [0, 0, 255, 255]],
+        ['distinct (8,8) reuses palette[0]',    app.distinctPix(8, 8),                                            [255, 0, 0, 255]],
+        ['distinct (0,0) blank stays clear',    app.distinctPix(0, 0),                                            [0, 0, 0, 0]],
+      ],
+    },
+
+    {
+      label: '13b-distinct-preview-off',
+      description: 'Toggle distinct-colors preview OFF — normal view returns.',
+      chain: true,
+      run: async (app) => { app.toggleDistinctPreview(); },
+      assertions: (app) => [
+        ['art visible',                  !app.canvas.classList.contains('hidden'),                          true],
+        ['distinct preview hidden',      app.q('#art-distinct-preview').classList.contains('hidden'),       true],
+      ],
+    },
+
+    {
+      label: '13c-previews-mutually-exclusive',
+      description: 'α preview and distinct preview cannot both be on — flipping one on flips the other off and unchecks its box.',
+      run: async (app) => {
+        app.click(4, 4);                                  // one opaque pixel
+        app.toggleAlphaPreview();                         // alpha ON
+        const after1 = {
+          alphaOn:    !app.q('#art-alpha-preview').classList.contains('hidden'),
+          distinctOn: !app.q('#art-distinct-preview').classList.contains('hidden'),
+          alphaChecked:    app.q('#alpha-preview').checked,
+          distinctChecked: app.q('#distinct-preview').checked,
+        };
+        app.toggleDistinctPreview();                      // distinct ON → alpha forced OFF
+        const after2 = {
+          alphaOn:    !app.q('#art-alpha-preview').classList.contains('hidden'),
+          distinctOn: !app.q('#art-distinct-preview').classList.contains('hidden'),
+          alphaChecked:    app.q('#alpha-preview').checked,
+          distinctChecked: app.q('#distinct-preview').checked,
+        };
+        app.toggleAlphaPreview();                         // alpha ON → distinct forced OFF
+        const after3 = {
+          alphaOn:    !app.q('#art-alpha-preview').classList.contains('hidden'),
+          distinctOn: !app.q('#art-distinct-preview').classList.contains('hidden'),
+          alphaChecked:    app.q('#alpha-preview').checked,
+          distinctChecked: app.q('#distinct-preview').checked,
+        };
+        app.toggleAlphaPreview();                         // tidy up
+        return { after1, after2, after3 };
+      },
+      assertions: (_app, ctx) => [
+        ['1: alpha on',                  ctx.after1.alphaOn,         true],
+        ['1: distinct off',              ctx.after1.distinctOn,      false],
+        ['1: alpha box checked',         ctx.after1.alphaChecked,    true],
+        ['2: distinct on',               ctx.after2.distinctOn,      true],
+        ['2: alpha off',                 ctx.after2.alphaOn,         false],
+        ['2: alpha box unchecked',       ctx.after2.alphaChecked,    false],
+        ['2: distinct box checked',      ctx.after2.distinctChecked, true],
+        ['3: alpha on',                  ctx.after3.alphaOn,         true],
+        ['3: distinct off',              ctx.after3.distinctOn,      false],
+        ['3: distinct box unchecked',    ctx.after3.distinctChecked, false],
       ],
     },
 
@@ -778,28 +875,31 @@
       ],
     },
 
-    // ===== prompt-2 item 25: Palette quantizer (TDD) =====
+    // ===== prompt-2 item 25: Color Quantization panel (k-means + pixel-sets) =====
 
     {
-      label: '52-quantize-button-exists',
-      description: 'Quantize button + Max colors input (default 16) present in toolbar.',
+      label: '52-quant-panel-collapsed-by-default',
+      description: 'Color Quantization section appears in the page, collapsed; Quantize button is inside the body (revealed on expand).',
       run: async () => {},
       assertions: (app) => [
-        ['button exists', !!app.q('#btn-quantize'), true],
-        ['N input',       app.q('#quantize-n').value, '16'],
+        ['panel exists',             !!app.q('#quant-panel'),                                       true],
+        ['body hidden initially',    app.q('#quant-body').classList.contains('hidden'),             true],
+        ['toggle aria-expanded',     app.q('#btn-quant-toggle').getAttribute('aria-expanded'),      'false'],
+        ['snap default checked',     app.q('#kmeans-snap').checked,                                  true],
       ],
     },
 
     {
       label: '53-quantize-to-one-color',
-      description: '9 ORANGE + 2 BLACK; quantize N=1 → every non-transparent pixel becomes ORANGE (most common).',
+      description: '9 ORANGE + 2 BLACK; expand panel, pick k=1 (snap mode) → every non-transparent pixel becomes ORANGE (the weighted-largest cluster snaps to ORANGE).',
       run: async (app) => {
         for (let i = 0; i < 9; i++) app.click(i, 0);
-        app.pickSwatch(0);                       // first default swatch is BLACK
+        app.pickSwatch(0);                       // BLACK
         app.click(10, 0);
         app.click(11, 0);
-        app.q('#quantize-n').value = '1';
-        app.q('#btn-quantize').click();
+        app.expandQuant();
+        app.pickKmeansK(1);
+        app.pressQuantize();
       },
       assertions: (app) => [
         ['(0,0) ORANGE',  app.pix(0, 0),  ORANGE],
@@ -809,8 +909,8 @@
     },
 
     {
-      label: '54-quantize-to-n-colors-remaps-rare',
-      description: '5 ORANGE + 3 BLACK + 1 dark-gray; quantize N=2 keeps top 2; dark-gray remaps to nearest (BLACK).',
+      label: '54-quantize-to-k-clusters-remaps-rare',
+      description: '5 ORANGE + 3 BLACK + 1 dark-gray; expand, k=2 (snap) keeps ORANGE & BLACK; dark-gray clusters with BLACK in LAB space and snaps there.',
       run: async (app) => {
         for (let i = 0; i < 5; i++) app.click(i, 0);
         app.pickSwatch(0);                       // BLACK
@@ -819,8 +919,9 @@
         inp.value = '#202020';
         inp.dispatchEvent(new app.win.Event('input', { bubbles: true }));
         app.click(8, 0);
-        app.q('#quantize-n').value = '2';
-        app.q('#btn-quantize').click();
+        app.expandQuant();
+        app.pickKmeansK(2);
+        app.pressQuantize();
       },
       assertions: (app) => [
         ['ORANGE stays ORANGE',        app.pix(0, 0), ORANGE],
@@ -831,11 +932,12 @@
 
     {
       label: '55-quantize-preserves-transparency',
-      description: 'Transparent pixels stay transparent — they don\'t count toward the palette and aren\'t recoloured.',
+      description: 'Transparent pixels stay transparent — they\'re excluded from clustering and untouched by Quantize.',
       run: async (app) => {
         app.click(0, 0);
-        app.q('#quantize-n').value = '1';
-        app.q('#btn-quantize').click();
+        app.expandQuant();
+        app.pickKmeansK(1);
+        app.pressQuantize();
       },
       assertions: (app) => [
         ['(0,0) painted',           app.pix(0, 0),  ORANGE],
@@ -845,13 +947,14 @@
 
     {
       label: '56-quantize-replaces-palette',
-      description: 'After quantize, palette contains only the retained colors.',
+      description: 'After Quantize, the global palette contains only the surviving quantized colors.',
       run: async (app) => {
         for (let i = 0; i < 5; i++) app.click(i, 0);
         app.pickSwatch(0);
         app.click(5, 0);
-        app.q('#quantize-n').value = '2';
-        app.q('#btn-quantize').click();
+        app.expandQuant();
+        app.pickKmeansK(2);
+        app.pressQuantize();
       },
       assertions: (app) => [
         ['palette has 2 swatches', app.qa('#palette .swatch:not(.add-swatch)').length, 2],
@@ -860,13 +963,14 @@
 
     {
       label: '57-quantize-undoable',
-      description: 'Undo after quantize restores the original (non-quantized) pixels.',
+      description: 'Undo after Quantize restores the original (non-quantized) pixels.',
       run: async (app) => {
         for (let i = 0; i < 5; i++) app.click(i, 0);
         app.pickSwatch(0);
         app.click(5, 0);
-        app.q('#quantize-n').value = '1';
-        app.q('#btn-quantize').click();
+        app.expandQuant();
+        app.pickKmeansK(1);
+        app.pressQuantize();
         const after = app.pix(5, 0);
         app.pressUndo();
         const restored = app.pix(5, 0);
@@ -955,29 +1059,66 @@
       ],
     },
 
-    // ===== prompt-2 item 23: In-canvas resize (TDD) =====
+    // ===== prompt-2 item 23: In-canvas resize (collapsible Image Resize panel) =====
 
     {
-      label: '63-resize-enters-in-canvas-mode',
-      description: 'Click Resize → #resize-ops becomes visible (no modal popup); old modal is gone.',
-      run: async (app) => { app.q('#btn-resize').click(); },
+      label: '63-resize-panel-collapsed-by-default',
+      description: 'Image Resize section is present, collapsed by default, with a header summary showing current canvas dims.',
+      run: async () => {},
       assertions: (app) => [
-        ['resize-ops visible',      app.q('#resize-ops').classList.contains('active'), true],
-        ['Apply button present',    !!app.q('#btn-resize-apply'),  true],
-        ['Cancel button present',   !!app.q('#btn-resize-cancel'), true],
-        ['shift X input present',   !!app.q('#resize-shift-x'),    true],
-        ['shift Y input present',   !!app.q('#resize-shift-y'),    true],
-        ['proposed W initial value', app.q('#resize-w').value,     '32'],
-        ['no resize-dialog markup',  !!app.q('#resize-dialog'),    false],
+        ['panel exists',                  !!app.q('#resize-panel'),                                       true],
+        ['body hidden initially',         app.q('#resize-body').classList.contains('hidden'),             true],
+        ['toggle aria-expanded false',    app.q('#btn-resize-toggle').getAttribute('aria-expanded'),      'false'],
+        ['collapsed summary shows dims',  app.q('#resize-summary').textContent,                           '32×32'],
+        ['no toolbar Resize… button',     !!app.q('#btn-resize'),                                          false],
+        ['no Cancel button',              !!app.q('#btn-resize-cancel'),                                   false],
+      ],
+    },
+
+    {
+      label: '63a-resize-panel-expands-and-inits-inputs',
+      description: 'Expanding the panel reveals W / H / aspect / shift inputs pre-filled with current dims, and enters resize mode (grid overlay drawn).',
+      run: async (app) => {
+        app.expandResize();
+      },
+      assertions: (app) => [
+        ['body visible',                   !app.q('#resize-body').classList.contains('hidden'),            true],
+        ['toggle aria-expanded true',      app.q('#btn-resize-toggle').getAttribute('aria-expanded'),      'true'],
+        ['Apply button present',           !!app.q('#btn-resize-apply'),                                    true],
+        ['shift X input present',          !!app.q('#resize-shift-x'),                                      true],
+        ['shift Y input present',          !!app.q('#resize-shift-y'),                                      true],
+        ['proposed W initial value',       app.q('#resize-w').value,                                        '32'],
+        ['proposed H initial value',       app.q('#resize-h').value,                                        '32'],
+      ],
+    },
+
+    {
+      label: '63b-resize-summary-live-updates',
+      description: 'Header summary live-updates as the user edits W / shift; aspect-locked and shift modifiers appear in the summary.',
+      run: async (app) => {
+        app.expandResize();
+        const w = app.q('#resize-w');
+        w.value = '16';
+        w.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        const summaryAfterW = app.q('#resize-summary').textContent;
+        const sx = app.q('#resize-shift-x');
+        sx.value = '2';
+        sx.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        const summaryAfterShift = app.q('#resize-summary').textContent;
+        return { summaryAfterW, summaryAfterShift };
+      },
+      assertions: (_app, ctx) => [
+        ['summary after W edit',      ctx.summaryAfterW,      '32×32 → 16×16 · aspect locked'],
+        ['summary after shift edit',  ctx.summaryAfterShift,  '32×32 → 16×16 · aspect locked · shift 2,0'],
       ],
     },
 
     {
       label: '64-resize-apply-no-shift',
-      description: 'Resize 32×32 → 16×16 with shift 0/0 — OLD pixel (2,0) ends up at NEW (1,0); OLD (0,0) ends up at NEW (0,0).',
+      description: 'Resize 32×32 → 16×16 with shift 0/0 — OLD pixel (2,0) ends up at NEW (1,0); OLD (0,0) ends up at NEW (0,0). Apply collapses the panel.',
       run: async (app) => {
         app.click(2, 0);                         // paint OLD (2,0) ORANGE
-        app.q('#btn-resize').click();
+        app.expandResize();
         app.q('#resize-w').value = '16';
         app.q('#resize-h').value = '16';
         app.q('#resize-shift-x').value = '0';
@@ -985,11 +1126,12 @@
         app.q('#btn-resize-apply').click();
       },
       assertions: (app) => [
-        ['canvas width',                app.canvas.width,    16],
-        ['canvas height',               app.canvas.height,   16],
-        ['NEW (1,0) sampled OLD (2,0)', app.pix(1, 0),       ORANGE],
-        ['NEW (0,0) sampled OLD (0,0)', app.pix(0, 0),       TRANSPARENT],
-        ['resize-ops hidden again',     app.q('#resize-ops').classList.contains('active'), false],
+        ['canvas width',                  app.canvas.width,                                            16],
+        ['canvas height',                 app.canvas.height,                                           16],
+        ['NEW (1,0) sampled OLD (2,0)',   app.pix(1, 0),                                               ORANGE],
+        ['NEW (0,0) sampled OLD (0,0)',   app.pix(0, 0),                                               TRANSPARENT],
+        ['body collapsed after Apply',    app.q('#resize-body').classList.contains('hidden'),          true],
+        ['summary shows new dims',        app.q('#resize-summary').textContent,                        '16×16'],
       ],
     },
 
@@ -998,7 +1140,7 @@
       description: 'Resize 32×32 → 16×16 with shift X=1 — OLD pixel (1,0) ends up at NEW (0,0) (was OLD (0,0) without shift).',
       run: async (app) => {
         app.click(1, 0);                         // paint OLD (1,0)
-        app.q('#btn-resize').click();
+        app.expandResize();
         app.q('#resize-w').value = '16';
         app.q('#resize-h').value = '16';
         app.q('#resize-shift-x').value = '1';
@@ -1012,54 +1154,58 @@
 
     {
       label: '66-resize-esc-cancels',
-      description: 'Esc while in resize mode exits without applying — canvas dimensions preserved.',
+      description: 'Esc while the panel is expanded collapses it without applying — canvas dimensions preserved.',
       run: async (app) => {
-        app.q('[data-tool="pencil"]').click();   // make sure tool is pencil so esc doesn't double-cancel something
-        app.q('#btn-resize').click();
+        app.q('[data-tool="pencil"]').click();
+        app.expandResize();
         app.q('#resize-w').value = '16';
         app.q('#resize-h').value = '16';
         app.keyboard('Escape');
       },
       assertions: (app) => [
-        ['canvas width preserved',  app.canvas.width,  32],
-        ['canvas height preserved', app.canvas.height, 32],
-        ['resize-ops hidden',       app.q('#resize-ops').classList.contains('active'), false],
+        ['canvas width preserved',  app.canvas.width,                                       32],
+        ['canvas height preserved', app.canvas.height,                                      32],
+        ['body collapsed',          app.q('#resize-body').classList.contains('hidden'),    true],
       ],
     },
 
     {
-      label: '67-resize-cancel-button',
-      description: 'Cancel button exits resize mode without applying.',
+      label: '67-resize-collapse-via-toggle-is-cancel',
+      description: 'Clicking the panel header again while expanded collapses without applying — replaces the old Cancel button.',
       run: async (app) => {
-        app.q('#btn-resize').click();
+        app.expandResize();
         app.q('#resize-w').value = '16';
-        app.q('#btn-resize-cancel').click();
+        app.q('#btn-resize-toggle').click();      // collapse via header → implicit cancel
       },
       assertions: (app) => [
-        ['canvas width preserved', app.canvas.width, 32],
-        ['resize-ops hidden',      app.q('#resize-ops').classList.contains('active'), false],
+        ['canvas width preserved', app.canvas.width,                                       32],
+        ['body collapsed',         app.q('#resize-body').classList.contains('hidden'),    true],
       ],
     },
 
     {
       label: '68-resize-undoable',
-      description: 'Undo after resize restores both dimensions and pixel content.',
+      description: 'Undo after resize restores both dimensions and pixel content; the collapsed summary follows.',
       run: async (app) => {
         app.click(5, 5);                          // paint a pixel
-        app.q('#btn-resize').click();
+        app.expandResize();
         app.q('#resize-w').value = '16';
         app.q('#resize-h').value = '16';
         app.q('#btn-resize-apply').click();
         const afterDims  = [app.canvas.width, app.canvas.height];
+        const afterSummary = app.q('#resize-summary').textContent;
         app.pressUndo();
         const undoneDims = [app.canvas.width, app.canvas.height];
+        const undoneSummary = app.q('#resize-summary').textContent;
         const restoredPx = app.pix(5, 5);
-        return { afterDims, undoneDims, restoredPx };
+        return { afterDims, afterSummary, undoneDims, undoneSummary, restoredPx };
       },
       assertions: (_app, ctx) => [
-        ['after resize 16x16',  ctx.afterDims,  [16, 16]],
-        ['after undo 32x32',    ctx.undoneDims, [32, 32]],
-        ['restored pixel',      ctx.restoredPx, ORANGE],
+        ['after resize 16x16',         ctx.afterDims,      [16, 16]],
+        ['after-resize summary',       ctx.afterSummary,   '16×16'],
+        ['after undo 32x32',           ctx.undoneDims,     [32, 32]],
+        ['post-undo summary follows',  ctx.undoneSummary,  '32×32'],
+        ['restored pixel',             ctx.restoredPx,     ORANGE],
       ],
     },
 
@@ -1179,6 +1325,235 @@
         ['(16,16) cleared (right)',  app.pix(16, 16),  TRANSPARENT],
         ['(31,31) cleared (right)',  app.pix(31, 31),  TRANSPARENT],
         ['(15,5) still empty',       app.pix(15, 5),   TRANSPARENT],
+      ],
+    },
+
+    // ===== prompt-2 item 25 (continued): Pixel-sets table + k-means analysis =====
+
+    {
+      label: '75-quant-panel-toggles',
+      description: 'Color Quantization toggle expands/collapses the body, sets aria-expanded, and rotates the caret affordance.',
+      run: async (app) => {
+        app.expandQuant();
+        const open = {
+          bodyVisible: !app.q('#quant-body').classList.contains('hidden'),
+          ariaExpanded: app.q('#btn-quant-toggle').getAttribute('aria-expanded'),
+        };
+        app.collapseQuant();
+        const closed = {
+          bodyVisible: !app.q('#quant-body').classList.contains('hidden'),
+          ariaExpanded: app.q('#btn-quant-toggle').getAttribute('aria-expanded'),
+        };
+        return { open, closed };
+      },
+      assertions: (_app, ctx) => [
+        ['expanded: body visible',    ctx.open.bodyVisible,    true],
+        ['expanded: aria-expanded',   ctx.open.ariaExpanded,   'true'],
+        ['collapsed: body hidden',    ctx.closed.bodyVisible,  false],
+        ['collapsed: aria-expanded',  ctx.closed.ariaExpanded, 'false'],
+      ],
+    },
+
+    {
+      label: '76-pixel-sets-row-indices',
+      description: 'Each pixel-set row has a 1-based # index column, and per-row dropdown options reference target colors by their pixel-set # in snap mode.',
+      run: async (app) => {
+        for (let y = 0; y < 3; y++) for (let x = 0; x < 3; x++) app.click(x, y);    // 9 ORANGE → row #1
+        const cp = app.q('#current-color');
+        cp.value = '#000000'; cp.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        for (let y = 10; y < 12; y++) for (let x = 10; x < 12; x++) app.click(x, y); // 4 BLACK → row #2
+        app.expandQuant();
+        app.pickKmeansK(2);
+        const rows = Array.from(app.q('#pixel-sets-table tbody').querySelectorAll('tr'));
+        const firstSel = rows[0].querySelector('select');
+        return {
+          row1Idx: rows[0].querySelector('.ps-index').textContent,
+          row2Idx: rows[1].querySelector('.ps-index').textContent,
+          row1Default: rows[0].querySelector('select option:checked').textContent,
+          dropdownOpts: Array.from(firstSel.options).map(o => o.textContent),
+        };
+      },
+      assertions: (_app, ctx) => [
+        ['row 1 index',                ctx.row1Idx,                                              '#1'],
+        ['row 2 index',                ctx.row2Idx,                                              '#2'],
+        ['row 1 default label (snap)', ctx.row1Default,                                          '#1 · rgba(203, 110, 74, 255)'],
+        ['dropdown labels reference pixel-set #s', ctx.dropdownOpts.every(s => /^#\d+ · rgba/.test(s)), true],
+      ],
+    },
+
+    {
+      label: '77-pixel-sets-table-counts',
+      description: 'Pixel-sets table has one row per distinct RGBA, sorted by count desc, with correct counts.',
+      run: async (app) => {
+        for (let y = 0; y < 3; y++) for (let x = 0; x < 3; x++) app.click(x, y);
+        const cp = app.q('#current-color');
+        cp.value = '#000000'; cp.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        for (let y = 10; y < 12; y++) for (let x = 10; x < 12; x++) app.click(x, y);
+        app.expandQuant();
+        const rows = Array.from(app.q('#pixel-sets-table tbody').querySelectorAll('tr'));
+        return {
+          rowCount: rows.length,
+          firstSrc: rows[0]?.dataset.srcKey,
+          firstCount: rows[0]?.querySelectorAll('td')[3].textContent,
+          secondSrc: rows[1]?.dataset.srcKey,
+          secondCount: rows[1]?.querySelectorAll('td')[3].textContent,
+        };
+      },
+      assertions: (_app, ctx) => [
+        ['two rows',                       ctx.rowCount,    2],
+        ['top row is ORANGE (most common)', ctx.firstSrc,   '203,110,74,255'],
+        ['top row count',                  ctx.firstCount,  '9'],
+        ['next row is BLACK',              ctx.secondSrc,   '0,0,0,255'],
+        ['next row count',                 ctx.secondCount, '4'],
+      ],
+    },
+
+    {
+      label: '78-pixel-sets-row-select-builds-mask',
+      description: 'Per-row Select sets the global selection to every pixel of that RGBA (same as Same-color selection); Delete clears them.',
+      run: async (app) => {
+        for (let y = 0; y < 3; y++) for (let x = 0; x < 3; x++) app.click(x, y);
+        const cp = app.q('#current-color');
+        cp.value = '#000000'; cp.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        for (let y = 10; y < 12; y++) for (let x = 10; x < 12; x++) app.click(x, y);
+        app.expandQuant();
+        const blackRow = app.q('#pixel-sets-table tbody tr[data-src-key="0,0,0,255"]');
+        blackRow.querySelector('td:nth-child(5) button').click();   // Select column
+        app.keyboard('Delete');
+      },
+      assertions: (app) => [
+        ['BLACK (10,10) cleared',    app.pix(10, 10), [0, 0, 0, 0]],
+        ['BLACK (11,11) cleared',    app.pix(11, 11), [0, 0, 0, 0]],
+        ['ORANGE (0,0) untouched',   app.pix(0, 0),   [203, 110, 74, 255]],
+        ['ORANGE (2,2) untouched',   app.pix(2, 2),   [203, 110, 74, 255]],
+      ],
+    },
+
+    {
+      label: '79-pixel-sets-row-replace-immediate',
+      description: 'Per-row Replace immediately remaps that pixel-set; undo restores. Other colors untouched.',
+      run: async (app) => {
+        for (let x = 0; x < 5; x++) app.click(x, 0);                   // 5 ORANGE
+        const cp = app.q('#current-color');
+        cp.value = '#000000'; cp.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        for (let x = 0; x < 3; x++) app.click(x, 1);                   // 3 BLACK
+        cp.value = '#222222'; cp.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        app.click(0, 2);                                                // 1 dark-gray
+        app.expandQuant();
+        app.pickKmeansK(2);
+        const grayRow = app.q('#pixel-sets-table tbody tr[data-src-key="34,34,34,255"]');
+        const defaultLabel = grayRow.querySelector('select option:checked').textContent;
+        grayRow.querySelector('td:nth-child(7) button').click();        // Replace column
+        const afterReplace = app.pix(0, 2);
+        app.pressUndo();
+        return { defaultLabel, afterReplace };
+      },
+      assertions: (app, ctx) => [
+        ['default dst = BLACK (nearest)', ctx.defaultLabel.endsWith('rgba(0, 0, 0, 255)'),         true],
+        ['(0,2) became BLACK',            ctx.afterReplace,                                        [0, 0, 0, 255]],
+        ['undo restored dark-gray',       app.pix(0, 2),                                           [34, 34, 34, 255]],
+        ['ORANGE pixels untouched',       app.pix(0, 0),                                           [203, 110, 74, 255]],
+        ['BLACK pixels untouched',        app.pix(0, 1),                                           [0, 0, 0, 255]],
+      ],
+    },
+
+    {
+      label: '80-pixel-sets-quantize-with-override',
+      description: 'User overrides a row\'s dropdown to a non-default cluster, then bulk Quantize honours the override.',
+      run: async (app) => {
+        for (let x = 0; x < 5; x++) app.click(x, 0);
+        const cp = app.q('#current-color');
+        cp.value = '#000000'; cp.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        for (let x = 0; x < 3; x++) app.click(x, 1);
+        cp.value = '#222222'; cp.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        app.click(0, 2);
+        app.expandQuant();
+        app.pickKmeansK(2);
+        const grayRow = app.q('#pixel-sets-table tbody tr[data-src-key="34,34,34,255"]');
+        const picked = pickDropdownByRgba(grayRow, app.win, [203, 110, 74, 255]);  // override to ORANGE
+        app.pressQuantize();
+        return { picked };
+      },
+      assertions: (app, ctx) => [
+        ['override option present',          ctx.picked,        true],
+        ['dark-gray → ORANGE (overridden)',  app.pix(0, 2),     [203, 110, 74, 255]],
+        ['ORANGE survives',                   app.pix(0, 0),     [203, 110, 74, 255]],
+        ['BLACK survives',                    app.pix(0, 1),     [0, 0, 0, 255]],
+      ],
+    },
+
+    {
+      label: '81-pixel-sets-quantize-swap-cycle',
+      description: 'Override ORANGE→BLACK and BLACK→ORANGE; bulk Quantize swaps them atomically (single-pass snapshot read, no iteration).',
+      run: async (app) => {
+        for (let x = 0; x < 5; x++) app.click(x, 0);
+        const cp = app.q('#current-color');
+        cp.value = '#000000'; cp.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        for (let x = 0; x < 3; x++) app.click(x, 1);
+        app.expandQuant();
+        app.pickKmeansK(2);
+        const orangeRow = app.q('#pixel-sets-table tbody tr[data-src-key="203,110,74,255"]');
+        const blackRow  = app.q('#pixel-sets-table tbody tr[data-src-key="0,0,0,255"]');
+        const a = pickDropdownByRgba(orangeRow, app.win, [0, 0, 0, 255]);          // ORANGE → BLACK
+        const b = pickDropdownByRgba(blackRow,  app.win, [203, 110, 74, 255]);     // BLACK → ORANGE
+        app.pressQuantize();
+        return { a, b };
+      },
+      assertions: (app, ctx) => [
+        ['ORANGE override present',     ctx.a,             true],
+        ['BLACK override present',      ctx.b,             true],
+        ['was-ORANGE now BLACK (0,0)',  app.pix(0, 0),     [0, 0, 0, 255]],
+        ['was-ORANGE now BLACK (4,0)',  app.pix(4, 0),     [0, 0, 0, 255]],
+        ['was-BLACK now ORANGE (0,1)',  app.pix(0, 1),     [203, 110, 74, 255]],
+        ['was-BLACK now ORANGE (2,1)',  app.pix(2, 1),     [203, 110, 74, 255]],
+      ],
+    },
+
+    {
+      label: '82-kmeans-error-monotone',
+      description: 'K-means mean ΔE/px is non-increasing as k grows, and reaches 0 at k = distinct count.',
+      run: async (app) => {
+        // 3 distinct colors with clear separation: ORANGE, BLACK, dark-gray.
+        for (let x = 0; x < 5; x++) app.click(x, 0);
+        const cp = app.q('#current-color');
+        cp.value = '#000000'; cp.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        for (let x = 0; x < 3; x++) app.click(x, 1);
+        cp.value = '#888888'; cp.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        app.click(0, 2);
+        app.expandQuant();
+        const rows = Array.from(app.q('#kmeans-table tbody').querySelectorAll('tr'));
+        const errs = rows.map(r => parseFloat(r.querySelectorAll('td')[2].textContent));
+        return { errs };
+      },
+      assertions: (_app, ctx) => [
+        ['three k rows (1..3)',                                ctx.errs.length,                           3],
+        ['k=1 error > 0',                                       ctx.errs[0] > 0,                          true],
+        ['k=2 error ≤ k=1 error',                               ctx.errs[1] <= ctx.errs[0] + 1e-9,        true],
+        ['k=3 error ≤ k=2 error',                               ctx.errs[2] <= ctx.errs[1] + 1e-9,        true],
+        ['k=distinct → 0 error (each color is its own cluster)',ctx.errs[2] < 1e-6,                       true],
+      ],
+    },
+
+    {
+      label: '83-kmeans-snap-vs-centroid-proposals-differ',
+      description: 'For a 2-cluster scenario at k=1, snap mode produces a real image color while centroid mode produces a synthetic midpoint — the proposed colors differ.',
+      run: async (app) => {
+        // 7 ORANGE + 3 BLACK → cluster center is weighted toward ORANGE in both modes.
+        for (let x = 0; x < 7; x++) app.click(x, 0);
+        const cp = app.q('#current-color');
+        cp.value = '#000000'; cp.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        for (let x = 0; x < 3; x++) app.click(x, 1);
+        app.expandQuant();
+        app.pickKmeansK(1);
+        app.setKmeansSnap(true);
+        const snapTitle = app.q('#kmeans-table tbody tr[data-k="1"] .qcolor').title;
+        app.setKmeansSnap(false);
+        const centroidTitle = app.q('#kmeans-table tbody tr[data-k="1"] .qcolor').title;
+        return { snapTitle, centroidTitle };
+      },
+      assertions: (_app, ctx) => [
+        ['snap proposal differs from centroid proposal', ctx.snapTitle !== ctx.centroidTitle, true],
+        ['snap proposal IS ORANGE (a real image color)', ctx.snapTitle,                       'rgba(203, 110, 74, 255)'],
       ],
     },
   ];

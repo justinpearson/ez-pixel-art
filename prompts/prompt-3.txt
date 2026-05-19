@@ -1,0 +1,41 @@
+Let's work on the color-quantizing feature. Add a checkbox like we have for "alpha preview", that shows all the different colors by representing each distinct color with a visually distinct color. For example, if an image has 12 different (but very similar) colors, you can get a sense of this by temporarily replacing each color with a palette of extremely different primary colors: red, green, blue, yellow, orange, etc. Put the checkbox next to the existing "alpha preview" checkbox. Obviously, toggling the checkbox is just a viewing / diagnostic tool, and does not edit the underlying image.
+
+---
+
+
+Ok now let's build out the "quantize colors" feature. So, the "distinct colors" checkbox that you just added is great -- it shows where are the different colors in the image. Now I want a way to see how many pixels are of each color: 123 pixels have color RGBA_1, 333 pixels have color RGBA_2, etc. Let's use the term "pixel-set" for a set of pixels on the image that all have the exact same color RGBA. Sort pixel-sets by count. Make each pixel-set have a "select" button that selects all those pixels in the pixel-set -- the equivalent to using the "Same Color" selection tool. And make each pixel-set have a "replace with [COLOR]" button that replaces that pixel-set's pixels' colors with the color "[COLOR]", which is automatically picked from a list of "quantized colors", of length "Max Colors" (the existing UI input), which is basically the N most-used colors in the current image. The proposed-replacement [COLOR] for a pixel-set should be the closest color in Quantized Colors to the pixel-set's color, but there also needs to be some kind of UI to allow me to select a different replacement color from the list of Quantized Colors, like a dropdown or something, if I want to override the default choice. And then the "Quantize" button actually commits the color-swapping operation. Oh, and take care to avoid infinite loops, eg, if I say to replace pixel-set 1's colors with pixel-set 2, and pixel-set 2's colors with pixel-set 1. Seem like an unusual case, because the intended use-case is to mop up small pixel-sets that correspond to pixels on edges, whose colors were messed up due to aliasing / blending at the edge between two differently-colored areas of the image.
+
+
+---
+
+
+That "pixel sets" UI is great! Add indices to the rows to make it easier to refer to them. And in addition to the "Replace with" that lists the RGBA of the proposed color replacement, let's also show the proposed replacement color's row-index and color.
+
+Also, it seems like we should be able to help the user by figuring out ahead of time how many distinct colors there actually should be, by using a clustering algorithm like k-means on the pixel values to find the clusters, and either using the cluster centroids as proposed replacements, or the closest existing pixel-set's color as the proposed replacement. For the clustering algorithm's difference function, use the Euclidean distance in LAB color space, not RGB. Run k-means for several values of k, show the user some sort of "fitting error" for each value of k, and have a checkbox for whether the error + proposed new palette uses the cluster centroids or the closest-pixel-set-to-its-centroid. And this can replace the manual "Max Colors" UI.
+
+This is a lot of UI, so let's have everything to do with color quantization under a new collapsed menu labeled "Color Quantization". 
+
+
+----
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

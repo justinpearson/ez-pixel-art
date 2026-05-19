@@ -53,19 +53,8 @@
     </div>
 
     <div class="group">
-      <button id="btn-resize" title="Resize image — opens on-canvas resize controls">Resize…</button>
       <button id="btn-crop"   title="Crop to opaque content">Crop</button>
       <button id="btn-fill-selection" title="Fill selected pixels with current color (Enter)">Fill Sel</button>
-    </div>
-
-    <div class="group" id="resize-ops">
-      <label>W <input type="number" id="resize-w" min="1" max="2048" value="32" /></label>
-      <label>H <input type="number" id="resize-h" min="1" max="2048" value="32" /></label>
-      <label class="check"><input type="checkbox" id="resize-keep-aspect" checked /> Lock aspect</label>
-      <label>Shift X <input type="number" id="resize-shift-x" value="0" /></label>
-      <label>Shift Y <input type="number" id="resize-shift-y" value="0" /></label>
-      <button id="btn-resize-apply" title="Commit the resize">Apply</button>
-      <button id="btn-resize-cancel" title="Exit resize mode without applying (Esc)">Cancel</button>
     </div>
 
     <div class="group">
@@ -74,6 +63,7 @@
       <button id="btn-zoom-in" title="Zoom in (+)">+</button>
       <label class="check"><input type="checkbox" id="grid-toggle" /> <b>G</b>rid</label>
       <label class="check"><input type="checkbox" id="alpha-preview" /> α preview</label>
+      <label class="check" title="Recolor each distinct RGBA in the image with a high-contrast hue so similar colors are easy to tell apart. View-only — does not edit the image."><input type="checkbox" id="distinct-preview" /> distinct colors</label>
     </div>
 
     <div class="group" id="color-section">
@@ -90,19 +80,92 @@
       <div id="palette" title="Click swatch to use · right-click to remove"></div>
     </div>
 
-    <div class="group" id="palette-ops">
-      <label>Max colors <input type="number" id="quantize-n" min="1" max="64" value="16" /></label>
-      <button id="btn-quantize" title="Squash image to the N most-common colors; replaces palette with the kept colors">Quantize</button>
-    </div>
-
     <span id="status"></span>
   </header>
+
+  <section id="resize-panel">
+    <header id="resize-header">
+      <button id="btn-resize-toggle" type="button" class="panel-toggle" aria-expanded="false" title="Show / hide the Image Resize panel">
+        <span class="caret">▶</span>
+        <span class="panel-title">Image Resize</span>
+      </button>
+      <span id="resize-summary"></span>
+    </header>
+    <div id="resize-body" class="hidden">
+      <div class="resize-controls">
+        <label>W <input type="number" id="resize-w" min="1" max="2048" value="32" /></label>
+        <label>H <input type="number" id="resize-h" min="1" max="2048" value="32" /></label>
+        <label class="check"><input type="checkbox" id="resize-keep-aspect" checked /> Lock aspect</label>
+        <label>Shift X <input type="number" id="resize-shift-x" value="0" /></label>
+        <label>Shift Y <input type="number" id="resize-shift-y" value="0" /></label>
+        <button id="btn-resize-apply" title="Commit the resize (collapses the panel). Press Esc or click the header to cancel.">Apply</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="quant-panel">
+    <header id="quant-header">
+      <button id="btn-quant-toggle" type="button" class="quant-toggle" aria-expanded="false" title="Show / hide the Color Quantization panel">
+        <span class="caret">▶</span>
+        <span class="quant-title">Color Quantization</span>
+      </button>
+      <span id="quant-summary"></span>
+    </header>
+    <div id="quant-body" class="hidden">
+      <div class="quant-section" id="quant-kmeans-section">
+        <div class="quant-section-header">
+          <h4>K-means clusters (LAB color space)</h4>
+          <label class="check" title="Checked: each proposed cluster color is snapped to the closest existing pixel-set, preserving real image colors and alpha. Unchecked: the raw cluster centroid color is used (synthetic, alpha forced to 255).">
+            <input type="checkbox" id="kmeans-snap" checked />
+            Snap centroids to closest pixel-set
+          </label>
+        </div>
+        <table id="kmeans-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>k</th>
+              <th title="Root-mean-square LAB distance per pixel from its cluster centroid. Lower = better fit.">Mean ΔE / px</th>
+              <th>Proposed colors</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="quant-section" id="quant-pixelsets-section">
+        <div class="quant-section-header">
+          <h4>Pixel sets</h4>
+          <span id="pixel-sets-summary"></span>
+        </div>
+        <div id="pixel-sets-table-wrap">
+          <table id="pixel-sets-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Color</th>
+                <th>RGBA</th>
+                <th>Count</th>
+                <th>Select</th>
+                <th>Replace with</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="quant-actions">
+        <button id="btn-quantize" title="Apply every row's chosen replacement in one atomic pass.">Quantize (apply all replacements)</button>
+      </div>
+    </div>
+  </section>
 
   <main>
     <div id="canvas-wrap">
       <div id="canvas-stage" class="checker">
         <canvas id="art"></canvas>
         <canvas id="art-alpha-preview" class="hidden"></canvas>
+        <canvas id="art-distinct-preview" class="hidden"></canvas>
         <canvas id="hover-overlay"></canvas>
         <canvas id="selection-overlay"></canvas>
         <canvas id="resize-grid-overlay"></canvas>

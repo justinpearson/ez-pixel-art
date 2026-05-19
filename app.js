@@ -9,6 +9,8 @@
   const artCtx        = artCanvas.getContext('2d', { willReadFrequently: true });
   const previewCanvas = $('#art-alpha-preview');
   const previewCtx    = previewCanvas.getContext('2d');
+  const distinctCanvas = $('#art-distinct-preview');
+  const distinctCtx    = distinctCanvas.getContext('2d');
   const hoverCanvas   = $('#hover-overlay');
   const hoverCtx      = hoverCanvas.getContext('2d');
   const selectionCanvas = $('#selection-overlay');
@@ -65,6 +67,8 @@
     artCanvas.height = h;
     previewCanvas.width  = w;
     previewCanvas.height = h;
+    distinctCanvas.width  = w;
+    distinctCanvas.height = h;
     hoverCanvas.width    = w;
     hoverCanvas.height   = h;
     selectionCanvas.width  = w;
@@ -76,6 +80,11 @@
     // dimension change keeps subsequent operations safe.
     if (selection && selection.mask.length !== w * h) selection = null;
     applyZoom();
+    // The resize panel's collapsed header advertises the current canvas dims,
+    // so it must refresh whenever the canvas resizes from outside the panel
+    // (Apply, Crop, undo/redo, Open import). Guard for first call before the
+    // panel DOM and helper are wired.
+    if (typeof renderResizeSummary === 'function') renderResizeSummary();
   }
   function applyZoom() {
     const cssW = imgW * zoom;
@@ -84,6 +93,8 @@
     artCanvas.style.height = cssH + 'px';
     previewCanvas.style.width  = cssW + 'px';
     previewCanvas.style.height = cssH + 'px';
+    distinctCanvas.style.width  = cssW + 'px';
+    distinctCanvas.style.height = cssH + 'px';
     hoverCanvas.style.width    = cssW + 'px';
     hoverCanvas.style.height   = cssH + 'px';
     selectionCanvas.style.width  = cssW + 'px';
@@ -387,7 +398,7 @@
   function restore(snap) {
     setCanvasSize(snap.width, snap.height);
     artCtx.putImageData(snap, 0, 0);
-    if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
+    refreshPreviews();
   }
   function pushUndoSnap(snap) {
     undoStack.push(snap);
@@ -542,43 +553,499 @@
       .map(([key]) => rgbaToHex([(key >> 16) & 0xff, (key >> 8) & 0xff, key & 0xff, 255]));
   }
 
-  // Squash the image to the top `maxColors` most-common RGBA tuples; every
-  // other non-transparent pixel is remapped to the nearest survivor in
-  // Euclidean RGBA distance. Transparent pixels are left alone. The palette
-  // is replaced with the kept colors.
-  function quantize(maxColors) {
-    const id = artCtx.getImageData(0, 0, imgW, imgH);
-    const d  = id.data;
+  // ---- Pixel-set analysis ----
+  // A "pixel-set" is the set of all pixels in the image that share an exact
+  // RGBA. analyze() returns one entry per distinct RGBA, sorted by count desc.
+  // Fully-transparent pixels (α=0) are excluded — they're treated as "no
+  // color" and never participate in quantization or counts.
+  function rgbaKey(r, g, b, a) { return r + ',' + g + ',' + b + ',' + a; }
+  function parseKey(k)         { return k.split(',').map(Number); }
+  function analyzePixelSets() {
+    const d = artCtx.getImageData(0, 0, imgW, imgH).data;
     const counts = new Map();
     for (let i = 0; i < d.length; i += 4) {
       if (d[i + 3] === 0) continue;
-      const key = `${d[i]},${d[i+1]},${d[i+2]},${d[i+3]}`;
-      counts.set(key, (counts.get(key) || 0) + 1);
+      const k = rgbaKey(d[i], d[i+1], d[i+2], d[i+3]);
+      counts.set(k, (counts.get(k) || 0) + 1);
     }
-    if (counts.size === 0) return;
-    const top = [...counts.entries()]
+    return [...counts.entries()]
       .sort((a, b) => b[1] - a[1])
-      .slice(0, maxColors)
-      .map(([key]) => key.split(',').map(Number));
+      .map(([key, count]) => ({ key, rgba: parseKey(key), count }));
+  }
+
+  // ---- LAB color space ----
+  // sRGB → linear → XYZ (D65) → L*a*b* (D65). Standard formulas; alpha is
+  // not represented in LAB and is handled separately in the quantize path.
+  function srgbToLin(c) {
+    const s = c / 255;
+    return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  }
+  function linToSrgb(l) {
+    const c = l <= 0.0031308 ? 12.92 * l : 1.055 * Math.pow(Math.max(l, 0), 1 / 2.4) - 0.055;
+    return Math.max(0, Math.min(255, Math.round(c * 255)));
+  }
+  function rgbToLab(r, g, b) {
+    const R = srgbToLin(r), G = srgbToLin(g), B = srgbToLin(b);
+    const X = R * 0.4124564 + G * 0.3575761 + B * 0.1804375;
+    const Y = R * 0.2126729 + G * 0.7151522 + B * 0.0721750;
+    const Z = R * 0.0193339 + G * 0.1191920 + B * 0.9503041;
+    const Xn = 0.95047, Yn = 1.0, Zn = 1.08883;
+    const f = t => t > 216 / 24389 ? Math.cbrt(t) : (t * 24389 / 27 + 16) / 116;
+    const fx = f(X / Xn), fy = f(Y / Yn), fz = f(Z / Zn);
+    return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+  }
+  function labToRgb(L, a, b) {
+    const fy = (L + 16) / 116;
+    const fx = fy + a / 500;
+    const fz = fy - b / 200;
+    const fInv = t => {
+      const t3 = t * t * t;
+      return t3 > 216 / 24389 ? t3 : (116 * t - 16) * 27 / 24389;
+    };
+    const Xn = 0.95047, Yn = 1.0, Zn = 1.08883;
+    const X = fInv(fx) * Xn, Y = fInv(fy) * Yn, Z = fInv(fz) * Zn;
+    const R =  3.2404542 * X - 1.5371385 * Y - 0.4985314 * Z;
+    const G = -0.9692660 * X + 1.8760108 * Y + 0.0415560 * Z;
+    const B =  0.0556434 * X - 0.2040259 * Y + 1.0572252 * Z;
+    return [linToSrgb(R), linToSrgb(G), linToSrgb(B)];
+  }
+  function sqDist3(a, b) {
+    const d0 = a[0] - b[0], d1 = a[1] - b[1], d2 = a[2] - b[2];
+    return d0*d0 + d1*d1 + d2*d2;
+  }
+
+  // ---- Weighted k-means in LAB ----
+  // Deterministic across runs: the PRNG seed is derived from the input
+  // points, so the same image always yields the same clustering. k-means++
+  // initialization plus Lloyd iterations.
+  function mulberry32(seed) {
+    return function() {
+      let t = (seed = (seed + 0x6D2B79F5) >>> 0);
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function weightedPick(items, weights, rng) {
+    let total = 0;
+    for (const w of weights) total += w;
+    if (total <= 0) return items[Math.floor(rng() * items.length)];
+    let r = rng() * total;
+    for (let i = 0; i < items.length; i++) {
+      r -= weights[i];
+      if (r <= 0) return items[i];
+    }
+    return items[items.length - 1];
+  }
+  function kmeansLab(points, weights, k, maxIters = 60) {
+    const n = points.length;
+    if (k >= n) {
+      return { centroids: points.map(p => [...p]), labels: points.map((_, i) => i), inertia: 0 };
+    }
+    let seed = 0xC0DEFACE;
+    for (const p of points) {
+      seed = ((seed * 31) >>> 0) ^ ((Math.round(p[0]) + Math.round(p[1] + 128) * 257 + Math.round(p[2] + 128) * 65537) >>> 0);
+    }
+    const rng = mulberry32(seed ^ k);
+    const centroids = [[...weightedPick(points, weights, rng)]];
+    for (let c = 1; c < k; c++) {
+      const dists = points.map((p, i) => {
+        let m = Infinity;
+        for (const cent of centroids) {
+          const d = sqDist3(p, cent);
+          if (d < m) m = d;
+        }
+        return m * weights[i];
+      });
+      centroids.push([...weightedPick(points, dists, rng)]);
+    }
+    const labels = new Array(n).fill(-1);
+    for (let iter = 0; iter < maxIters; iter++) {
+      let changed = false;
+      for (let i = 0; i < n; i++) {
+        let best = 0, bestD = Infinity;
+        for (let j = 0; j < k; j++) {
+          const d = sqDist3(points[i], centroids[j]);
+          if (d < bestD) { bestD = d; best = j; }
+        }
+        if (labels[i] !== best) { labels[i] = best; changed = true; }
+      }
+      if (!changed && iter > 0) break;
+      const sums = Array.from({ length: k }, () => [0, 0, 0]);
+      const cw   = new Array(k).fill(0);
+      for (let i = 0; i < n; i++) {
+        const j = labels[i], w = weights[i];
+        sums[j][0] += w * points[i][0];
+        sums[j][1] += w * points[i][1];
+        sums[j][2] += w * points[i][2];
+        cw[j]      += w;
+      }
+      for (let j = 0; j < k; j++) {
+        if (cw[j] === 0) continue;
+        centroids[j] = [sums[j][0] / cw[j], sums[j][1] / cw[j], sums[j][2] / cw[j]];
+      }
+    }
+    let inertia = 0;
+    for (let i = 0; i < n; i++) inertia += weights[i] * sqDist3(points[i], centroids[labels[i]]);
+    return { centroids, labels, inertia };
+  }
+
+  // ---- Quantized-colors derivation from k-means + snap mode ----
+  // For a given k-means result, derive the N quantized RGBAs the user will
+  // see. Two modes:
+  //   - Snap: each centroid is mapped to the closest existing pixel-set in
+  //     its cluster (preserves real image colors and alpha).
+  //   - Centroid: the centroid LAB is converted back to RGB and emitted at
+  //     α=255 (synthetic color, no alpha info available from the cluster).
+  // Returns { colors: [rgba[]], assignments: Map<srcKey, dstRgba[]> } where
+  // assignments map every pixel-set's key to the cluster color it would be
+  // remapped to (used to drive default dropdown choices in the table).
+  function quantizedColorsFor(sets, kRes, snap) {
+    const colors = [];
+    const assignments = new Map();
+    for (let j = 0; j < kRes.centroids.length; j++) {
+      const c = kRes.centroids[j];
+      let color;
+      if (snap) {
+        let bestIdx = -1, bestD = Infinity;
+        for (let i = 0; i < sets.length; i++) {
+          if (kRes.labels[i] !== j) continue;
+          const d = sqDist3(rgbToLab(sets[i].rgba[0], sets[i].rgba[1], sets[i].rgba[2]), c);
+          if (d < bestD) { bestD = d; bestIdx = i; }
+        }
+        color = bestIdx >= 0 ? sets[bestIdx].rgba.slice() : null;
+      } else {
+        const rgb = labToRgb(c[0], c[1], c[2]);
+        color = [rgb[0], rgb[1], rgb[2], 255];
+      }
+      colors.push(color);
+    }
+    for (let i = 0; i < sets.length; i++) {
+      assignments.set(sets[i].key, colors[kRes.labels[i]]);
+    }
+    return { colors, assignments };
+  }
+
+  // ---- Color quantization state + cache ----
+  const userOverrides = new Map();   // srcKey -> dst-color-index (into the current quantized list)
+  let selectedK = null;              // user's chosen k row (null = nothing picked yet)
+  let kmeansCache = null;            // { sig, sets, perK: [{k, kRes, snap, qColors, assignments, meanErr}] }
+
+  function pixelSetsSignature(sets) {
+    // Hash of (key, count) pairs in sort order. If it matches the cache, we
+    // can reuse k-means results across renders.
+    let h = 0xDEADBEEF;
+    for (const s of sets) {
+      for (let i = 0; i < s.key.length; i++) h = (h * 31 + s.key.charCodeAt(i)) >>> 0;
+      h = (h * 31 + s.count) >>> 0;
+    }
+    return h;
+  }
+  function snapChecked() { return $('#kmeans-snap').checked; }
+  function computeKmeansForAll(sets, snap) {
+    const points = sets.map(s => rgbToLab(s.rgba[0], s.rgba[1], s.rgba[2]));
+    const weights = sets.map(s => s.count);
+    const totalPixels = weights.reduce((a, b) => a + b, 0) || 1;
+    const maxK = Math.min(sets.length, 16);
+    const perK = [];
+    for (let k = 1; k <= maxK; k++) {
+      const kRes = kmeansLab(points, weights, k);
+      const { colors, assignments } = quantizedColorsFor(sets, kRes, snap);
+      perK.push({
+        k,
+        kRes,
+        snap,
+        qColors: colors,
+        assignments,
+        meanErr: Math.sqrt(kRes.inertia / totalPixels),
+      });
+    }
+    return perK;
+  }
+  function ensureKmeansCache() {
+    const sets = analyzePixelSets();
+    const sig = pixelSetsSignature(sets) ^ (snapChecked() ? 1 : 0);
+    if (!kmeansCache || kmeansCache.sig !== sig) {
+      kmeansCache = { sig, sets, perK: computeKmeansForAll(sets, snapChecked()) };
+    }
+    return kmeansCache;
+  }
+  function invalidateKmeansCache() { kmeansCache = null; }
+
+  // ---- Apply mappings (atomic single-pass remap) ----
+  function buildMappingsFromState(sets, qColors, assignments) {
+    // Map<srcKey, dst-rgba[]>. For each pixel-set: use the user's override if
+    // valid, else the k-means assignment. Identity entries (src color === dst
+    // color) are omitted as no-ops.
+    const map = new Map();
+    for (const { key, rgba } of sets) {
+      let dst;
+      const overrideIdx = userOverrides.get(key);
+      if (overrideIdx !== undefined && overrideIdx < qColors.length && qColors[overrideIdx]) {
+        dst = qColors[overrideIdx];
+      } else {
+        dst = assignments.get(key);
+      }
+      if (!dst) continue;
+      if (dst[0] === rgba[0] && dst[1] === rgba[1] && dst[2] === rgba[2] && dst[3] === rgba[3]) continue;
+      map.set(key, dst);
+    }
+    return map;
+  }
+  function applyMappings(mappings) {
+    // Single-pass remap from a snapshot, so cycles like A→B + B→A behave as
+    // a swap (not an iteration to fixed point).
+    if (mappings.size === 0) return false;
+    const id = artCtx.getImageData(0, 0, imgW, imgH);
+    const d  = id.data;
     pushUndo();
     for (let i = 0; i < d.length; i += 4) {
       if (d[i + 3] === 0) continue;
-      let best = top[0], bestDist = Infinity;
-      for (const c of top) {
-        const dr = c[0] - d[i], dg = c[1] - d[i+1], db = c[2] - d[i+2], da = c[3] - d[i+3];
-        const dist = dr*dr + dg*dg + db*db + da*da;
-        if (dist < bestDist) { bestDist = dist; best = c; }
-      }
-      d[i] = best[0]; d[i+1] = best[1]; d[i+2] = best[2]; d[i+3] = best[3];
+      const k = rgbaKey(d[i], d[i+1], d[i+2], d[i+3]);
+      const dst = mappings.get(k);
+      if (!dst) continue;
+      d[i] = dst[0]; d[i+1] = dst[1]; d[i+2] = dst[2]; d[i+3] = dst[3];
     }
     artCtx.putImageData(id, 0, 0);
-    palette = top.map(rgbaToHex);
-    renderPalette();
-    if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
+    refreshPreviews();
+    return true;
   }
-  function getQuantizeN() {
-    const n = parseInt($('#quantize-n').value, 10);
-    return Math.max(1, Math.min(64, Number.isFinite(n) ? n : 16));
+
+  function currentKBucket() {
+    const cache = ensureKmeansCache();
+    if (cache.sets.length === 0) return null;
+    const k = Math.min(selectedK ?? Math.min(cache.sets.length, 8), cache.perK.length);
+    return cache.perK[k - 1];
+  }
+
+  // The new Quantize: applies the current k-means selection's mappings
+  // atomically, plus any per-row overrides. Then refreshes the global
+  // palette with the surviving quantized colors and clears overrides.
+  function quantize() {
+    const cache = ensureKmeansCache();
+    if (cache.sets.length === 0) return;
+    const bucket = currentKBucket();
+    if (!bucket) return;
+    const mappings = buildMappingsFromState(cache.sets, bucket.qColors, bucket.assignments);
+    if (mappings.size > 0) applyMappings(mappings);
+    palette = bucket.qColors.filter(Boolean).map(rgbaToHex);
+    renderPalette();
+    userOverrides.clear();
+    invalidateKmeansCache();
+    if (isQuantPanelExpanded()) renderQuantPanel();
+  }
+
+  // ---- Color Quantization panel ----
+  function isQuantPanelExpanded() {
+    return !$('#quant-body').classList.contains('hidden');
+  }
+  function setQuantPanelExpanded(open) {
+    $('#quant-body').classList.toggle('hidden', !open);
+    $('#btn-quant-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) renderQuantPanel();
+  }
+  function renderQuantPanel() {
+    invalidateKmeansCache();   // Always recompute on explicit render — cheap for typical inputs.
+    const cache = ensureKmeansCache();
+    const sets  = cache.sets;
+
+    // Empty-state: nothing painted yet.
+    const tbodyKm = $('#kmeans-table tbody');
+    const tbodyPs = $('#pixel-sets-table tbody');
+    tbodyKm.innerHTML = '';
+    tbodyPs.innerHTML = '';
+    if (sets.length === 0) {
+      $('#quant-summary').textContent = '— no colors yet —';
+      $('#pixel-sets-summary').textContent = '';
+      $('#btn-quantize').disabled = true;
+      const empty = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4; td.className = 'quant-empty';
+      td.textContent = 'Paint something to see clusters.';
+      empty.appendChild(td);
+      tbodyKm.appendChild(empty);
+      return;
+    }
+    $('#btn-quantize').disabled = false;
+
+    // Pre-select k = min(distinct, 8) on first render or when the prior pick
+    // is no longer valid (distinct count shrank).
+    if (selectedK === null || selectedK > cache.perK.length) {
+      selectedK = Math.min(cache.perK.length, 8);
+    }
+
+    // Prune dead overrides (src no longer exists or override index out of
+    // range for the current quantized list).
+    const srcSet = new Set(sets.map(s => s.key));
+    const curBucket = cache.perK[selectedK - 1];
+    for (const [src, idx] of userOverrides) {
+      if (!srcSet.has(src) || idx >= curBucket.qColors.length) userOverrides.delete(src);
+    }
+
+    // ----- K-means table -----
+    for (const bucket of cache.perK) {
+      const tr = document.createElement('tr');
+      tr.dataset.k = bucket.k;
+      if (bucket.k === selectedK) tr.classList.add('is-selected');
+
+      const tdPick = document.createElement('td');
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'kmeans-k';
+      radio.checked = bucket.k === selectedK;
+      radio.addEventListener('change', () => selectK(bucket.k));
+      tdPick.appendChild(radio);
+
+      const tdK = document.createElement('td');
+      tdK.textContent = String(bucket.k);
+
+      const tdErr = document.createElement('td');
+      tdErr.textContent = bucket.meanErr.toFixed(2);
+
+      const tdColors = document.createElement('td');
+      const strip = document.createElement('span');
+      strip.className = 'km-colors';
+      for (const c of bucket.qColors) {
+        if (!c) continue;
+        const dot = document.createElement('span');
+        dot.className = 'qcolor';
+        dot.style.background = `rgba(${c.join(',')})`;
+        dot.title = `rgba(${c.join(', ')})`;
+        strip.appendChild(dot);
+      }
+      tdColors.appendChild(strip);
+
+      tr.appendChild(tdPick);
+      tr.appendChild(tdK);
+      tr.appendChild(tdErr);
+      tr.appendChild(tdColors);
+      tr.addEventListener('click', (e) => { if (e.target.tagName !== 'INPUT') selectK(bucket.k); });
+      tbodyKm.appendChild(tr);
+    }
+
+    // ----- Header summary -----
+    const k = selectedK;
+    $('#quant-summary').textContent =
+      `${sets.length} distinct color${sets.length === 1 ? '' : 's'} · k = ${k} · mode: ${snapChecked() ? 'snap' : 'centroid'}`;
+    $('#pixel-sets-summary').textContent =
+      `${sets.length} distinct · k = ${k} cluster${k === 1 ? '' : 's'}`;
+
+    // ----- Pixel-sets table -----
+    const qColors = curBucket.qColors;
+    // Per-pixel-set: which cluster index does it land in?
+    const clusterIdxByKey = new Map();
+    for (let i = 0; i < sets.length; i++) clusterIdxByKey.set(sets[i].key, curBucket.kRes.labels[i]);
+
+    // Quantized-color row indices in the pixel-sets table (only meaningful in
+    // snap mode, where each qColor IS an existing pixel-set). In snap mode
+    // this maps qColor → 1-based row index; in centroid mode it's "C{n}".
+    const qLabels = qColors.map((c, n) => {
+      if (!c) return `C${n + 1}`;
+      if (!snapChecked()) return `C${n + 1}`;
+      const k = rgbaKey(c[0], c[1], c[2], c[3]);
+      const rowIdx = sets.findIndex(s => s.key === k);
+      return rowIdx >= 0 ? `#${rowIdx + 1}` : `C${n + 1}`;
+    });
+
+    sets.forEach((set, rowIdx) => {
+      const { key, rgba, count } = set;
+      const clusterIdx = clusterIdxByKey.get(key);
+      const defaultIdx = userOverrides.get(key) ?? clusterIdx;
+      const defaultColor = qColors[defaultIdx];
+
+      const tr = document.createElement('tr');
+      tr.dataset.srcKey = key;
+      tr.dataset.rowIdx = rowIdx + 1;
+      // A pixel-set is "quantized" (i.e. in the surviving palette) if its
+      // color equals one of the qColors. In snap mode this happens for the
+      // chosen-pixel-set rows; in centroid mode it almost never happens.
+      const isQ = qColors.some(c => c && c[0] === rgba[0] && c[1] === rgba[1] && c[2] === rgba[2] && c[3] === rgba[3]);
+      if (isQ) tr.classList.add('is-quantized');
+
+      const tdIdx = document.createElement('td');
+      tdIdx.className = 'ps-index';
+      tdIdx.textContent = `#${rowIdx + 1}`;
+
+      const tdColor = document.createElement('td');
+      tdColor.className = 'ps-color-cell';
+      const sw = document.createElement('span');
+      sw.className = 'ps-swatch';
+      sw.style.setProperty('--swatch-color', `rgba(${rgba.join(',')})`);
+      tdColor.appendChild(sw);
+
+      const tdRgba = document.createElement('td');
+      tdRgba.className = 'ps-rgba';
+      tdRgba.textContent = `rgba(${rgba.join(', ')})`;
+
+      const tdCount = document.createElement('td');
+      tdCount.textContent = String(count);
+
+      const tdSelect = document.createElement('td');
+      const selectBtn = document.createElement('button');
+      selectBtn.textContent = 'Select';
+      selectBtn.title = 'Select every pixel in the image with this exact RGBA (same as the Same-color selection tool).';
+      selectBtn.addEventListener('click', () => {
+        selection = { mask: buildSameRgbaMask(rgba[0], rgba[1], rgba[2], rgba[3]) };
+        drawSelectionFromMask();
+      });
+      tdSelect.appendChild(selectBtn);
+
+      const tdTarget = document.createElement('td');
+      const wrap = document.createElement('span');
+      wrap.className = 'ps-target';
+      const sel = document.createElement('select');
+      qColors.forEach((c, n) => {
+        if (!c) return;
+        const opt = document.createElement('option');
+        opt.value = String(n);
+        opt.textContent = `${qLabels[n]} · rgba(${c.join(', ')})`;
+        if (n === defaultIdx) opt.selected = true;
+        opt.style.background = `rgba(${c.join(',')})`;
+        sel.appendChild(opt);
+      });
+      const previewDot = document.createElement('span');
+      previewDot.className = 'qcolor';
+      if (defaultColor) previewDot.style.background = `rgba(${defaultColor.join(',')})`;
+      sel.addEventListener('change', () => {
+        const idx = parseInt(sel.value, 10);
+        if (idx === clusterIdx) userOverrides.delete(key);
+        else                    userOverrides.set(key, idx);
+        const c = qColors[idx];
+        if (c) previewDot.style.background = `rgba(${c.join(',')})`;
+      });
+      wrap.appendChild(sel);
+      wrap.appendChild(previewDot);
+      tdTarget.appendChild(wrap);
+
+      const tdReplace = document.createElement('td');
+      const replaceBtn = document.createElement('button');
+      replaceBtn.textContent = 'Replace';
+      replaceBtn.title = 'Replace this pixel-set with the chosen color, immediately (undoable).';
+      replaceBtn.addEventListener('click', () => {
+        const idx = parseInt(sel.value, 10);
+        const dst = qColors[idx];
+        if (!dst) return;
+        if (dst[0] === rgba[0] && dst[1] === rgba[1] && dst[2] === rgba[2] && dst[3] === rgba[3]) return;
+        applyMappings(new Map([[key, dst]]));
+        userOverrides.delete(key);
+        renderQuantPanel();
+      });
+      tdReplace.appendChild(replaceBtn);
+
+      tr.appendChild(tdIdx);
+      tr.appendChild(tdColor);
+      tr.appendChild(tdRgba);
+      tr.appendChild(tdCount);
+      tr.appendChild(tdSelect);
+      tr.appendChild(tdTarget);
+      tr.appendChild(tdReplace);
+      tbodyPs.appendChild(tr);
+    });
+  }
+  function selectK(k) {
+    selectedK = k;
+    userOverrides.clear();  // Overrides reference cluster indices that change when k changes.
+    renderQuantPanel();
   }
 
   // ---------- Palette UI ----------
@@ -701,7 +1168,13 @@
     const id = artCtx.getImageData(0, 0, imgW, imgH);
     const d  = id.data;
     const si = (sy * imgW + sx) * 4;
-    const tr = d[si], tg = d[si+1], tb = d[si+2], ta = d[si+3];
+    return buildSameRgbaMaskFromData(d, d[si], d[si+1], d[si+2], d[si+3]);
+  }
+  function buildSameRgbaMask(tr, tg, tb, ta) {
+    const id = artCtx.getImageData(0, 0, imgW, imgH);
+    return buildSameRgbaMaskFromData(id.data, tr, tg, tb, ta);
+  }
+  function buildSameRgbaMaskFromData(d, tr, tg, tb, ta) {
     const m = new Uint8Array(imgW * imgH);
     for (let y = 0; y < imgH; y++) {
       for (let x = 0; x < imgW; x++) {
@@ -745,7 +1218,7 @@
       fn(d, idx * 4);
     }
     artCtx.putImageData(id, 0, 0);
-    if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
+    refreshPreviews();
   }
   function deleteSelection() {
     applyToSelection((d, i) => { d[i] = 0; d[i+1] = 0; d[i+2] = 0; d[i+3] = 0; });
@@ -771,6 +1244,12 @@
   }
   function setAlphaPreview(on) {
     if (on) {
+      // The two previews replace the art view, so only one can be visible at a
+      // time — flipping one on flips the other off.
+      if (!distinctCanvas.classList.contains('hidden')) {
+        $('#distinct-preview').checked = false;
+        setDistinctPreview(false);
+      }
       refreshAlphaPreview();
       previewCanvas.classList.remove('hidden');
       artCanvas.classList.add('hidden');
@@ -778,6 +1257,64 @@
       previewCanvas.classList.add('hidden');
       artCanvas.classList.remove('hidden');
     }
+  }
+
+  // ---------- Distinct-colors preview ----------
+  // High-contrast palette assigned in scan-order: the first unique RGBA
+  // encountered becomes red, the second green, etc. Fully-transparent pixels
+  // stay transparent so blank regions remain visible. Cycles past the palette
+  // length if the image has more unique colors.
+  const DISTINCT_PALETTE = [
+    [255,   0,   0], [  0, 200,   0], [  0,   0, 255], [255, 220,   0],
+    [255,   0, 255], [  0, 220, 220], [255, 140,   0], [140,   0, 255],
+    [  0, 140, 255], [140, 255,   0], [255,   0, 140], [  0, 255, 140],
+    [140,   0,   0], [  0, 100,   0], [  0,   0, 140], [140, 140,   0],
+    [140,   0, 140], [  0, 140, 140], [255, 255, 255], [120, 120, 120],
+    [255, 180, 200], [165,  80,  40], [200, 220, 100], [ 60,   0, 120],
+  ];
+  function refreshDistinctPreview() {
+    const src = artCtx.getImageData(0, 0, imgW, imgH);
+    const out = distinctCtx.createImageData(imgW, imgH);
+    const indexByKey = new Map();
+    for (let i = 0; i < src.data.length; i += 4) {
+      const a = src.data[i + 3];
+      if (a === 0) continue;
+      const key = (src.data[i] << 24) | (src.data[i+1] << 16) | (src.data[i+2] << 8) | a;
+      let idx = indexByKey.get(key);
+      if (idx === undefined) {
+        idx = indexByKey.size;
+        indexByKey.set(key, idx);
+      }
+      const [pr, pg, pb] = DISTINCT_PALETTE[idx % DISTINCT_PALETTE.length];
+      out.data[i] = pr;
+      out.data[i + 1] = pg;
+      out.data[i + 2] = pb;
+      out.data[i + 3] = 255;
+    }
+    distinctCtx.putImageData(out, 0, 0);
+  }
+  function setDistinctPreview(on) {
+    if (on) {
+      if (!previewCanvas.classList.contains('hidden')) {
+        $('#alpha-preview').checked = false;
+        setAlphaPreview(false);
+      }
+      refreshDistinctPreview();
+      distinctCanvas.classList.remove('hidden');
+      artCanvas.classList.add('hidden');
+    } else {
+      distinctCanvas.classList.add('hidden');
+      artCanvas.classList.remove('hidden');
+    }
+  }
+
+  // Re-render whichever preview is currently visible after a canvas mutation.
+  // Also re-renders the pixel-sets panel if it's open, since pixel counts and
+  // distinct-color set change with every edit.
+  function refreshPreviews() {
+    if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
+    if (!distinctCanvas.classList.contains('hidden')) refreshDistinctPreview();
+    if (isQuantPanelExpanded()) { invalidateKmeansCache(); renderQuantPanel(); }
   }
 
   // ---------- Status ----------
@@ -821,6 +1358,7 @@
     if (!activeStroke) return;
     activeStroke = false;
     tools[currentTool].onUp?.(pointerToPixel(e), e);
+    if (isQuantPanelExpanded()) { invalidateKmeansCache(); renderQuantPanel(); }
   });
   artCanvas.addEventListener('pointercancel', () => {
     if (!activeStroke) return;
@@ -846,8 +1384,11 @@
   $('#btn-zoom-out').addEventListener('click', () => { zoom = Math.max(MIN_ZOOM, zoom - 1); applyZoom(); });
   $('#grid-toggle').addEventListener('change', (e) => gridOverlay.classList.toggle('hidden', !e.target.checked));
   $('#alpha-preview').addEventListener('change', (e) => setAlphaPreview(e.target.checked));
+  $('#distinct-preview').addEventListener('change', (e) => setDistinctPreview(e.target.checked));
   $('#btn-save').addEventListener('click', () => saveImage($('#save-format').value));
-  $('#btn-quantize').addEventListener('click', () => quantize(getQuantizeN()));
+  $('#btn-quantize').addEventListener('click', quantize);
+  $('#btn-quant-toggle').addEventListener('click', () => setQuantPanelExpanded(!isQuantPanelExpanded()));
+  $('#kmeans-snap').addEventListener('change', () => { invalidateKmeansCache(); if (isQuantPanelExpanded()) renderQuantPanel(); });
   $('#btn-fill-selection').addEventListener('click', recolorSelection);
 
   // ---------- New ----------
@@ -970,10 +1511,17 @@
     importImg = null;
   });
 
-  // ---------- In-canvas resize mode ----------
-  let resizeMode = false;
+  // ---------- Image Resize panel ----------
+  // The panel mirrors the Color Quantization pattern: a collapsible section
+  // below the toolbar, with a live summary in the always-visible header. The
+  // body holds W / H / aspect / shift inputs plus Apply. Expanding the panel
+  // enters "resize mode" (grid overlay shown); collapsing exits it.
   const RESIZE_GRID_COLOR = [40, 200, 70, 220];
+  let resizeMode = false;
 
+  function isResizePanelExpanded() {
+    return !$('#resize-body').classList.contains('hidden');
+  }
   function getResizeParams() {
     const w  = clampDim($('#resize-w').value, imgW);
     const h  = clampDim($('#resize-h').value, imgH);
@@ -987,7 +1535,6 @@
     const { w: newW, h: newH, sx: shiftX, sy: shiftY } = getResizeParams();
     const cellW = imgW / newW;
     const cellH = imgH / newH;
-    // Vertical boundaries between proposed NEW pixels.
     for (let j = 0; j <= newW; j++) {
       const x = Math.floor(j * cellW + shiftX);
       if (x < 0 || x >= imgW) continue;
@@ -999,36 +1546,65 @@
       for (let x = 0; x < imgW; x++) paintPixel(x, y, resizeGridCtx, RESIZE_GRID_COLOR);
     }
   }
-  function enterResizeMode() {
-    resizeMode = true;
-    $('#resize-w').value = imgW;
-    $('#resize-h').value = imgH;
-    $('#resize-shift-x').value = 0;
-    $('#resize-shift-y').value = 0;
-    $('#resize-ops').classList.add('active');
-    drawResizeGrid();
+  function renderResizeSummary() {
+    // Always-visible header text. When the panel is collapsed or the user
+    // hasn't changed anything, just show the current dims. When pending
+    // changes exist, show the "from → to" plus aspect/shift modifiers.
+    const sum = $('#resize-summary');
+    const expanded = isResizePanelExpanded();
+    if (!expanded) {
+      sum.textContent = `${imgW}×${imgH}`;
+      return;
+    }
+    const { w, h, sx, sy } = getResizeParams();
+    const noChange = w === imgW && h === imgH && sx === 0 && sy === 0;
+    if (noChange) {
+      sum.textContent = `${imgW}×${imgH} (no pending change)`;
+      return;
+    }
+    const parts = [`${imgW}×${imgH} → ${w}×${h}`];
+    if ($('#resize-keep-aspect').checked) parts.push('aspect locked');
+    if (sx !== 0 || sy !== 0)             parts.push(`shift ${sx},${sy}`);
+    sum.textContent = parts.join(' · ');
   }
-  function exitResizeMode() {
-    resizeMode = false;
-    $('#resize-ops').classList.remove('active');
-    resizeGridCtx.clearRect(0, 0, imgW, imgH);
+  function setResizePanelExpanded(open) {
+    $('#resize-body').classList.toggle('hidden', !open);
+    $('#btn-resize-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+      // Re-initialise inputs to the current canvas state so the body always
+      // starts from a clean "no pending change" baseline.
+      $('#resize-w').value = imgW;
+      $('#resize-h').value = imgH;
+      $('#resize-shift-x').value = 0;
+      $('#resize-shift-y').value = 0;
+      resizeMode = true;
+      drawResizeGrid();
+    } else {
+      resizeMode = false;
+      resizeGridCtx.clearRect(0, 0, imgW, imgH);
+    }
+    renderResizeSummary();
   }
   function applyResize() {
     if (!resizeMode) return;
     const { w, h, sx, sy } = getResizeParams();
     if (w === imgW && h === imgH && sx === 0 && sy === 0) {
-      exitResizeMode();
+      setResizePanelExpanded(false);
       return;
     }
     pushUndo();
     resampleWithShift(w, h, sx, sy);
     fitZoom();
-    exitResizeMode();
+    setResizePanelExpanded(false);
+    refreshPreviews();
   }
+  // Back-compat alias: code paths elsewhere (keyboard Esc, undo/redo restore)
+  // call exitResizeMode() to dismiss the in-canvas overlay. Route through the
+  // panel toggle so the header summary stays in sync.
+  function exitResizeMode() { setResizePanelExpanded(false); }
 
-  $('#btn-resize').addEventListener('click', enterResizeMode);
+  $('#btn-resize-toggle').addEventListener('click', () => setResizePanelExpanded(!isResizePanelExpanded()));
   $('#btn-resize-apply').addEventListener('click', applyResize);
-  $('#btn-resize-cancel').addEventListener('click', exitResizeMode);
 
   $('#resize-w').addEventListener('input', () => {
     if ($('#resize-keep-aspect').checked) {
@@ -1037,6 +1613,7 @@
       $('#resize-h').value = Math.max(1, Math.round(w / ratio));
     }
     drawResizeGrid();
+    renderResizeSummary();
   });
   $('#resize-h').addEventListener('input', () => {
     if ($('#resize-keep-aspect').checked) {
@@ -1045,9 +1622,14 @@
       $('#resize-w').value = Math.max(1, Math.round(h * ratio));
     }
     drawResizeGrid();
+    renderResizeSummary();
   });
-  $('#resize-shift-x').addEventListener('input', drawResizeGrid);
-  $('#resize-shift-y').addEventListener('input', drawResizeGrid);
+  $('#resize-shift-x').addEventListener('input', () => { drawResizeGrid(); renderResizeSummary(); });
+  $('#resize-shift-y').addEventListener('input', () => { drawResizeGrid(); renderResizeSummary(); });
+  $('#resize-keep-aspect').addEventListener('change', renderResizeSummary);
+
+  // First render so the collapsed header shows the initial dims.
+  renderResizeSummary();
 
   // ---------- Crop ----------
   $('#btn-crop').addEventListener('click', () => {
