@@ -38,9 +38,21 @@ Save formats are handled differently. PNG goes through `canvas.toBlob()`. JPG co
 
 Import flow goes Open → `loadImage()` → `openImportDialog()` → preview canvas plus optional palette extraction → on accept, draw with `imageSmoothingEnabled = false` so resampling stays nearest-neighbour.
 
+## Collapsible panels (Color Quantization, Image Resize)
+
+Two large feature areas live below the toolbar as collapsible `<section>` panels sharing the `.panel-toggle` styling — a header with a rotating caret and a live summary that stays visible when the body is collapsed (`#quant-body`, `#resize-body` toggle a `hidden` class). Use the same pattern for any future feature that needs more space than a toolbar group affords. The summary line should advertise the most useful current state ("32×32" for resize, "5 distinct colors · k = 3 · mode: snap" for quantization) so users don't have to expand the panel to know what it would do.
+
+The Color Quantization panel is built on a "pixel-set" abstraction (`analyzePixelSets()` returns one entry per distinct RGBA, sorted by count, α=0 excluded). Weighted k-means runs in CIE L\*a\*b\* space (`rgbToLab`, `labToRgb`) for k = 1..min(distinct, 16) with a deterministic seeded k-means++ init — the same image always yields the same clustering. `quantizedColorsFor()` derives the N proposed colors per k either by snapping each centroid to the closest existing pixel-set (preserves real image colors and alpha) or by converting the LAB centroid directly back to sRGB at α=255. Quantize commits the mappings via `applyMappings()`, which uses a single-pass remap from an `ImageData` snapshot — so swap cycles like A→B + B→A behave as a swap rather than iterating to a fixed point.
+
+The Image Resize panel auto-enters resize mode (draws the green grid overlay on `#resize-grid-overlay`) when expanded and exits when collapsed. Apply commits and collapses; Esc or clicking the header again collapses without applying (the explicit Cancel button was removed).
+
+## Diagnostic preview canvases
+
+`#art-alpha-preview` (grayscale of α channel) and `#art-distinct-preview` (each distinct RGBA recoloured with a high-contrast hue) are stacked on top of `#art` and shown via the two checkboxes in the toolbar. They're mutually exclusive — turning one on flips the other off and unchecks its box. Both refresh via `refreshPreviews()`, which is wired into every canvas-mutating code path that already updates the alpha preview.
+
 ## Backlog: `prompts/`
 
-`prompts/prompt-1.txt` is the original feature request that produced the current app. `prompts/prompt-2.txt` is a list of follow-up feature ideas (alpha channel everywhere, adjustable pencil size, rectangle/line tools, live-preview cursor, in-canvas resize with shiftable grid overlay, color-palette quantizer, selection tools, etc.) that are **not yet implemented**. Treat `prompt-2.txt` as a backlog when planning work, but per the user's global rules, **never edit any `prompt-*.txt` file** — these are human-authored requirements docs.
+`prompts/prompt-1.txt` is the original feature request that produced the current app. `prompts/prompt-2.txt` is a list of follow-up feature ideas, most of which are now shipped (alpha channel, brush size, rect/line tools, live cursor preview, in-canvas resize, palette quantizer, all selection modes, recolor selection). `prompts/prompt-3.txt` is the spec for the distinct-colors preview + interactive pixel-sets quantizer + k-means analysis — now shipped. Treat the `prompt-*.txt` files as a backlog when planning new work, but per the user's global rules, **never edit any `prompt-*.txt` file** — these are human-authored requirements docs.
 
 ## Scratch area: `scratch/`
 
