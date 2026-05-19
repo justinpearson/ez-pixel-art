@@ -102,6 +102,12 @@
     collapseQuant() {
       if (!this.q('#quant-body').classList.contains('hidden')) this.q('#btn-quant-toggle').click();
     }
+    expandResize() {
+      if (this.q('#resize-body').classList.contains('hidden')) this.q('#btn-resize-toggle').click();
+    }
+    collapseResize() {
+      if (!this.q('#resize-body').classList.contains('hidden')) this.q('#btn-resize-toggle').click();
+    }
     pickKmeansK(k) {
       const row = this.q(`#kmeans-table tbody tr[data-k="${k}"]`);
       row.querySelector('input[type=radio]').click();

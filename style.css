@@ -117,8 +117,9 @@ body { display: flex; flex-direction: column; }
   text-align: right;
 }
 
-/* ---------- Color Quantization panel ---------- */
-#quant-panel {
+/* ---------- Collapsible panels (shared by Color Quantization, Image Resize) ---------- */
+#quant-panel,
+#resize-panel {
   flex-shrink: 0;
   background: #fafafa;
   border-bottom: 1px solid #ddd;
@@ -126,7 +127,8 @@ body { display: flex; flex-direction: column; }
   flex-direction: column;
   max-height: 60vh;
 }
-#quant-header {
+#quant-header,
+#resize-header {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -134,6 +136,7 @@ body { display: flex; flex-direction: column; }
   background: #f3f3f3;
   border-bottom: 1px solid #e5e5e5;
 }
+.panel-toggle,
 .quant-toggle {
   display: inline-flex;
   align-items: center;
@@ -146,15 +149,45 @@ body { display: flex; flex-direction: column; }
   cursor: pointer;
   color: inherit;
 }
+.panel-toggle:hover,
 .quant-toggle:hover { background: #ececec; border-radius: 4px; }
+.panel-toggle .caret,
 .quant-toggle .caret {
   display: inline-block;
   font-size: 10px;
   color: #888;
   transition: transform 0.12s ease;
 }
+.panel-toggle[aria-expanded="true"] .caret,
 .quant-toggle[aria-expanded="true"] .caret { transform: rotate(90deg); }
-#quant-summary { color: #666; font-size: 12px; }
+#quant-summary,
+#resize-summary { color: #666; font-size: 12px; }
+
+/* ---------- Image Resize panel ---------- */
+#resize-body { padding: 8px 12px; }
+#resize-body.hidden { display: none; }
+.resize-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+.resize-controls label { display: inline-flex; align-items: center; gap: 4px; }
+.resize-controls input[type="number"] {
+  width: 64px;
+  padding: 2px 4px;
+  font: inherit;
+}
+.resize-controls #btn-resize-apply {
+  padding: 4px 14px;
+  font: inherit;
+  background: #4a8dff;
+  color: #fff;
+  border: 1px solid #2a6de0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.resize-controls #btn-resize-apply:hover { background: #3a7dee; }
 #quant-body {
   flex: 1;
   min-height: 0;
@@ -333,8 +366,6 @@ main { flex: 1; min-height: 0; }
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
-#resize-ops { display: none; }
-#resize-ops.active { display: flex; }
 #grid-overlay {
   position: absolute;
   inset: 0;

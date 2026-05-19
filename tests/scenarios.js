@@ -1059,29 +1059,66 @@
       ],
     },
 
-    // ===== prompt-2 item 23: In-canvas resize (TDD) =====
+    // ===== prompt-2 item 23: In-canvas resize (collapsible Image Resize panel) =====
 
     {
-      label: '63-resize-enters-in-canvas-mode',
-      description: 'Click Resize → #resize-ops becomes visible (no modal popup); old modal is gone.',
-      run: async (app) => { app.q('#btn-resize').click(); },
+      label: '63-resize-panel-collapsed-by-default',
+      description: 'Image Resize section is present, collapsed by default, with a header summary showing current canvas dims.',
+      run: async () => {},
       assertions: (app) => [
-        ['resize-ops visible',      app.q('#resize-ops').classList.contains('active'), true],
-        ['Apply button present',    !!app.q('#btn-resize-apply'),  true],
-        ['Cancel button present',   !!app.q('#btn-resize-cancel'), true],
-        ['shift X input present',   !!app.q('#resize-shift-x'),    true],
-        ['shift Y input present',   !!app.q('#resize-shift-y'),    true],
-        ['proposed W initial value', app.q('#resize-w').value,     '32'],
-        ['no resize-dialog markup',  !!app.q('#resize-dialog'),    false],
+        ['panel exists',                  !!app.q('#resize-panel'),                                       true],
+        ['body hidden initially',         app.q('#resize-body').classList.contains('hidden'),             true],
+        ['toggle aria-expanded false',    app.q('#btn-resize-toggle').getAttribute('aria-expanded'),      'false'],
+        ['collapsed summary shows dims',  app.q('#resize-summary').textContent,                           '32×32'],
+        ['no toolbar Resize… button',     !!app.q('#btn-resize'),                                          false],
+        ['no Cancel button',              !!app.q('#btn-resize-cancel'),                                   false],
+      ],
+    },
+
+    {
+      label: '63a-resize-panel-expands-and-inits-inputs',
+      description: 'Expanding the panel reveals W / H / aspect / shift inputs pre-filled with current dims, and enters resize mode (grid overlay drawn).',
+      run: async (app) => {
+        app.expandResize();
+      },
+      assertions: (app) => [
+        ['body visible',                   !app.q('#resize-body').classList.contains('hidden'),            true],
+        ['toggle aria-expanded true',      app.q('#btn-resize-toggle').getAttribute('aria-expanded'),      'true'],
+        ['Apply button present',           !!app.q('#btn-resize-apply'),                                    true],
+        ['shift X input present',          !!app.q('#resize-shift-x'),                                      true],
+        ['shift Y input present',          !!app.q('#resize-shift-y'),                                      true],
+        ['proposed W initial value',       app.q('#resize-w').value,                                        '32'],
+        ['proposed H initial value',       app.q('#resize-h').value,                                        '32'],
+      ],
+    },
+
+    {
+      label: '63b-resize-summary-live-updates',
+      description: 'Header summary live-updates as the user edits W / shift; aspect-locked and shift modifiers appear in the summary.',
+      run: async (app) => {
+        app.expandResize();
+        const w = app.q('#resize-w');
+        w.value = '16';
+        w.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        const summaryAfterW = app.q('#resize-summary').textContent;
+        const sx = app.q('#resize-shift-x');
+        sx.value = '2';
+        sx.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        const summaryAfterShift = app.q('#resize-summary').textContent;
+        return { summaryAfterW, summaryAfterShift };
+      },
+      assertions: (_app, ctx) => [
+        ['summary after W edit',      ctx.summaryAfterW,      '32×32 → 16×16 · aspect locked'],
+        ['summary after shift edit',  ctx.summaryAfterShift,  '32×32 → 16×16 · aspect locked · shift 2,0'],
       ],
     },
 
     {
       label: '64-resize-apply-no-shift',
-      description: 'Resize 32×32 → 16×16 with shift 0/0 — OLD pixel (2,0) ends up at NEW (1,0); OLD (0,0) ends up at NEW (0,0).',
+      description: 'Resize 32×32 → 16×16 with shift 0/0 — OLD pixel (2,0) ends up at NEW (1,0); OLD (0,0) ends up at NEW (0,0). Apply collapses the panel.',
       run: async (app) => {
         app.click(2, 0);                         // paint OLD (2,0) ORANGE
-        app.q('#btn-resize').click();
+        app.expandResize();
         app.q('#resize-w').value = '16';
         app.q('#resize-h').value = '16';
         app.q('#resize-shift-x').value = '0';
@@ -1089,11 +1126,12 @@
         app.q('#btn-resize-apply').click();
       },
       assertions: (app) => [
-        ['canvas width',                app.canvas.width,    16],
-        ['canvas height',               app.canvas.height,   16],
-        ['NEW (1,0) sampled OLD (2,0)', app.pix(1, 0),       ORANGE],
-        ['NEW (0,0) sampled OLD (0,0)', app.pix(0, 0),       TRANSPARENT],
-        ['resize-ops hidden again',     app.q('#resize-ops').classList.contains('active'), false],
+        ['canvas width',                  app.canvas.width,                                            16],
+        ['canvas height',                 app.canvas.height,                                           16],
+        ['NEW (1,0) sampled OLD (2,0)',   app.pix(1, 0),                                               ORANGE],
+        ['NEW (0,0) sampled OLD (0,0)',   app.pix(0, 0),                                               TRANSPARENT],
+        ['body collapsed after Apply',    app.q('#resize-body').classList.contains('hidden'),          true],
+        ['summary shows new dims',        app.q('#resize-summary').textContent,                        '16×16'],
       ],
     },
 
@@ -1102,7 +1140,7 @@
       description: 'Resize 32×32 → 16×16 with shift X=1 — OLD pixel (1,0) ends up at NEW (0,0) (was OLD (0,0) without shift).',
       run: async (app) => {
         app.click(1, 0);                         // paint OLD (1,0)
-        app.q('#btn-resize').click();
+        app.expandResize();
         app.q('#resize-w').value = '16';
         app.q('#resize-h').value = '16';
         app.q('#resize-shift-x').value = '1';
@@ -1116,54 +1154,58 @@
 
     {
       label: '66-resize-esc-cancels',
-      description: 'Esc while in resize mode exits without applying — canvas dimensions preserved.',
+      description: 'Esc while the panel is expanded collapses it without applying — canvas dimensions preserved.',
       run: async (app) => {
-        app.q('[data-tool="pencil"]').click();   // make sure tool is pencil so esc doesn't double-cancel something
-        app.q('#btn-resize').click();
+        app.q('[data-tool="pencil"]').click();
+        app.expandResize();
         app.q('#resize-w').value = '16';
         app.q('#resize-h').value = '16';
         app.keyboard('Escape');
       },
       assertions: (app) => [
-        ['canvas width preserved',  app.canvas.width,  32],
-        ['canvas height preserved', app.canvas.height, 32],
-        ['resize-ops hidden',       app.q('#resize-ops').classList.contains('active'), false],
+        ['canvas width preserved',  app.canvas.width,                                       32],
+        ['canvas height preserved', app.canvas.height,                                      32],
+        ['body collapsed',          app.q('#resize-body').classList.contains('hidden'),    true],
       ],
     },
 
     {
-      label: '67-resize-cancel-button',
-      description: 'Cancel button exits resize mode without applying.',
+      label: '67-resize-collapse-via-toggle-is-cancel',
+      description: 'Clicking the panel header again while expanded collapses without applying — replaces the old Cancel button.',
       run: async (app) => {
-        app.q('#btn-resize').click();
+        app.expandResize();
         app.q('#resize-w').value = '16';
-        app.q('#btn-resize-cancel').click();
+        app.q('#btn-resize-toggle').click();      // collapse via header → implicit cancel
       },
       assertions: (app) => [
-        ['canvas width preserved', app.canvas.width, 32],
-        ['resize-ops hidden',      app.q('#resize-ops').classList.contains('active'), false],
+        ['canvas width preserved', app.canvas.width,                                       32],
+        ['body collapsed',         app.q('#resize-body').classList.contains('hidden'),    true],
       ],
     },
 
     {
       label: '68-resize-undoable',
-      description: 'Undo after resize restores both dimensions and pixel content.',
+      description: 'Undo after resize restores both dimensions and pixel content; the collapsed summary follows.',
       run: async (app) => {
         app.click(5, 5);                          // paint a pixel
-        app.q('#btn-resize').click();
+        app.expandResize();
         app.q('#resize-w').value = '16';
         app.q('#resize-h').value = '16';
         app.q('#btn-resize-apply').click();
         const afterDims  = [app.canvas.width, app.canvas.height];
+        const afterSummary = app.q('#resize-summary').textContent;
         app.pressUndo();
         const undoneDims = [app.canvas.width, app.canvas.height];
+        const undoneSummary = app.q('#resize-summary').textContent;
         const restoredPx = app.pix(5, 5);
-        return { afterDims, undoneDims, restoredPx };
+        return { afterDims, afterSummary, undoneDims, undoneSummary, restoredPx };
       },
       assertions: (_app, ctx) => [
-        ['after resize 16x16',  ctx.afterDims,  [16, 16]],
-        ['after undo 32x32',    ctx.undoneDims, [32, 32]],
-        ['restored pixel',      ctx.restoredPx, ORANGE],
+        ['after resize 16x16',         ctx.afterDims,      [16, 16]],
+        ['after-resize summary',       ctx.afterSummary,   '16×16'],
+        ['after undo 32x32',           ctx.undoneDims,     [32, 32]],
+        ['post-undo summary follows',  ctx.undoneSummary,  '32×32'],
+        ['restored pixel',             ctx.restoredPx,     ORANGE],
       ],
     },
 

@@ -80,6 +80,11 @@
     // dimension change keeps subsequent operations safe.
     if (selection && selection.mask.length !== w * h) selection = null;
     applyZoom();
+    // The resize panel's collapsed header advertises the current canvas dims,
+    // so it must refresh whenever the canvas resizes from outside the panel
+    // (Apply, Crop, undo/redo, Open import). Guard for first call before the
+    // panel DOM and helper are wired.
+    if (typeof renderResizeSummary === 'function') renderResizeSummary();
   }
   function applyZoom() {
     const cssW = imgW * zoom;
@@ -1506,10 +1511,17 @@
     importImg = null;
   });
 
-  // ---------- In-canvas resize mode ----------
-  let resizeMode = false;
+  // ---------- Image Resize panel ----------
+  // The panel mirrors the Color Quantization pattern: a collapsible section
+  // below the toolbar, with a live summary in the always-visible header. The
+  // body holds W / H / aspect / shift inputs plus Apply. Expanding the panel
+  // enters "resize mode" (grid overlay shown); collapsing exits it.
   const RESIZE_GRID_COLOR = [40, 200, 70, 220];
+  let resizeMode = false;
 
+  function isResizePanelExpanded() {
+    return !$('#resize-body').classList.contains('hidden');
+  }
   function getResizeParams() {
     const w  = clampDim($('#resize-w').value, imgW);
     const h  = clampDim($('#resize-h').value, imgH);
@@ -1523,7 +1535,6 @@
     const { w: newW, h: newH, sx: shiftX, sy: shiftY } = getResizeParams();
     const cellW = imgW / newW;
     const cellH = imgH / newH;
-    // Vertical boundaries between proposed NEW pixels.
     for (let j = 0; j <= newW; j++) {
       const x = Math.floor(j * cellW + shiftX);
       if (x < 0 || x >= imgW) continue;
@@ -1535,37 +1546,65 @@
       for (let x = 0; x < imgW; x++) paintPixel(x, y, resizeGridCtx, RESIZE_GRID_COLOR);
     }
   }
-  function enterResizeMode() {
-    resizeMode = true;
-    $('#resize-w').value = imgW;
-    $('#resize-h').value = imgH;
-    $('#resize-shift-x').value = 0;
-    $('#resize-shift-y').value = 0;
-    $('#resize-ops').classList.add('active');
-    drawResizeGrid();
+  function renderResizeSummary() {
+    // Always-visible header text. When the panel is collapsed or the user
+    // hasn't changed anything, just show the current dims. When pending
+    // changes exist, show the "from → to" plus aspect/shift modifiers.
+    const sum = $('#resize-summary');
+    const expanded = isResizePanelExpanded();
+    if (!expanded) {
+      sum.textContent = `${imgW}×${imgH}`;
+      return;
+    }
+    const { w, h, sx, sy } = getResizeParams();
+    const noChange = w === imgW && h === imgH && sx === 0 && sy === 0;
+    if (noChange) {
+      sum.textContent = `${imgW}×${imgH} (no pending change)`;
+      return;
+    }
+    const parts = [`${imgW}×${imgH} → ${w}×${h}`];
+    if ($('#resize-keep-aspect').checked) parts.push('aspect locked');
+    if (sx !== 0 || sy !== 0)             parts.push(`shift ${sx},${sy}`);
+    sum.textContent = parts.join(' · ');
   }
-  function exitResizeMode() {
-    resizeMode = false;
-    $('#resize-ops').classList.remove('active');
-    resizeGridCtx.clearRect(0, 0, imgW, imgH);
+  function setResizePanelExpanded(open) {
+    $('#resize-body').classList.toggle('hidden', !open);
+    $('#btn-resize-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+      // Re-initialise inputs to the current canvas state so the body always
+      // starts from a clean "no pending change" baseline.
+      $('#resize-w').value = imgW;
+      $('#resize-h').value = imgH;
+      $('#resize-shift-x').value = 0;
+      $('#resize-shift-y').value = 0;
+      resizeMode = true;
+      drawResizeGrid();
+    } else {
+      resizeMode = false;
+      resizeGridCtx.clearRect(0, 0, imgW, imgH);
+    }
+    renderResizeSummary();
   }
   function applyResize() {
     if (!resizeMode) return;
     const { w, h, sx, sy } = getResizeParams();
     if (w === imgW && h === imgH && sx === 0 && sy === 0) {
-      exitResizeMode();
+      setResizePanelExpanded(false);
       return;
     }
     pushUndo();
     resampleWithShift(w, h, sx, sy);
     fitZoom();
-    exitResizeMode();
+    setResizePanelExpanded(false);
     refreshPreviews();
   }
+  // Back-compat alias: code paths elsewhere (keyboard Esc, undo/redo restore)
+  // call exitResizeMode() to dismiss the in-canvas overlay. Route through the
+  // panel toggle so the header summary stays in sync.
+  function exitResizeMode() { setResizePanelExpanded(false); }
 
-  $('#btn-resize').addEventListener('click', enterResizeMode);
+  $('#btn-resize-toggle').addEventListener('click', () => setResizePanelExpanded(!isResizePanelExpanded()));
   $('#btn-resize-apply').addEventListener('click', applyResize);
-  $('#btn-resize-cancel').addEventListener('click', exitResizeMode);
 
   $('#resize-w').addEventListener('input', () => {
     if ($('#resize-keep-aspect').checked) {
@@ -1574,6 +1613,7 @@
       $('#resize-h').value = Math.max(1, Math.round(w / ratio));
     }
     drawResizeGrid();
+    renderResizeSummary();
   });
   $('#resize-h').addEventListener('input', () => {
     if ($('#resize-keep-aspect').checked) {
@@ -1582,9 +1622,14 @@
       $('#resize-w').value = Math.max(1, Math.round(h * ratio));
     }
     drawResizeGrid();
+    renderResizeSummary();
   });
-  $('#resize-shift-x').addEventListener('input', drawResizeGrid);
-  $('#resize-shift-y').addEventListener('input', drawResizeGrid);
+  $('#resize-shift-x').addEventListener('input', () => { drawResizeGrid(); renderResizeSummary(); });
+  $('#resize-shift-y').addEventListener('input', () => { drawResizeGrid(); renderResizeSummary(); });
+  $('#resize-keep-aspect').addEventListener('change', renderResizeSummary);
+
+  // First render so the collapsed header shows the initial dims.
+  renderResizeSummary();
 
   // ---------- Crop ----------
   $('#btn-crop').addEventListener('click', () => {

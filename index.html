@@ -53,19 +53,8 @@
     </div>
 
     <div class="group">
-      <button id="btn-resize" title="Resize image — opens on-canvas resize controls">Resize…</button>
       <button id="btn-crop"   title="Crop to opaque content">Crop</button>
       <button id="btn-fill-selection" title="Fill selected pixels with current color (Enter)">Fill Sel</button>
-    </div>
-
-    <div class="group" id="resize-ops">
-      <label>W <input type="number" id="resize-w" min="1" max="2048" value="32" /></label>
-      <label>H <input type="number" id="resize-h" min="1" max="2048" value="32" /></label>
-      <label class="check"><input type="checkbox" id="resize-keep-aspect" checked /> Lock aspect</label>
-      <label>Shift X <input type="number" id="resize-shift-x" value="0" /></label>
-      <label>Shift Y <input type="number" id="resize-shift-y" value="0" /></label>
-      <button id="btn-resize-apply" title="Commit the resize">Apply</button>
-      <button id="btn-resize-cancel" title="Exit resize mode without applying (Esc)">Cancel</button>
     </div>
 
     <div class="group">
@@ -93,6 +82,26 @@
 
     <span id="status"></span>
   </header>
+
+  <section id="resize-panel">
+    <header id="resize-header">
+      <button id="btn-resize-toggle" type="button" class="panel-toggle" aria-expanded="false" title="Show / hide the Image Resize panel">
+        <span class="caret">▶</span>
+        <span class="panel-title">Image Resize</span>
+      </button>
+      <span id="resize-summary"></span>
+    </header>
+    <div id="resize-body" class="hidden">
+      <div class="resize-controls">
+        <label>W <input type="number" id="resize-w" min="1" max="2048" value="32" /></label>
+        <label>H <input type="number" id="resize-h" min="1" max="2048" value="32" /></label>
+        <label class="check"><input type="checkbox" id="resize-keep-aspect" checked /> Lock aspect</label>
+        <label>Shift X <input type="number" id="resize-shift-x" value="0" /></label>
+        <label>Shift Y <input type="number" id="resize-shift-y" value="0" /></label>
+        <button id="btn-resize-apply" title="Commit the resize (collapses the panel). Press Esc or click the header to cancel.">Apply</button>
+      </div>
+    </div>
+  </section>
 
   <section id="quant-panel">
     <header id="quant-header">
