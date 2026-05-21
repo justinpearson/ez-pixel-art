@@ -1,0 +1,20 @@
+This all looks incredible! Terrific work. 
+
+1. Make 'v' the hotkey for the "Save" button.
+
+2. Put file format selector (png, bmp, etc) to the RIGHT of the Save button.
+
+3. Change keyboard shortcut for "Color Quantization" from 'c' to 'q'.
+
+4. Make 'c' the hotkey for "Crop to Selection".
+
+5. IIRC, "Thickness" selector and "Filled" checkbox pertain to the Drawing tools, so move them into the Draw panel.
+
+6. Auto-Crop button & hotkey don't work. For default pic (Clawd mascot) it should wipe out all those surrounding white background pixels.
+
+7. Make 't' the hotkey for "distinct colors"
+
+8. Move "Crop to Selection" and "Fill Selection" to the right of the Selection "Mode" dropdown.
+
+9. In the Draw panel, remove the color palette -- all those little color swatches to the right of the "Pick" button. I don't use them. Also remove the "Add current color to palette" button.
+

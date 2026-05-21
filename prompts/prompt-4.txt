@@ -1,0 +1,54 @@
+prompt-4.txt -- misc small features / improvements
+
+1. In the checkbox for "Grid", there's a space between the "G" and the "rid" that shouldn't be there.
+
+2. When I twirl down the "image resize" panel, it appears to freeze because it takes so long to draw the lines for the resizer, because the initial width is the same width as the image, so there are tons of lines to draw. Instead, let's default to W/5 or something, to make the Number of resizer lines manageable.
+
+3. Re-word the "alpha preview" checkbox to literally "alpha preview" -- no greek character -- and make the "a" be bold -- a keyboard shortcut to toggle the alpha preview checkbox.
+
+4. "Selection" refinement. Currently we use a 1-px thick semi-transparent blue line to show selected pixels. That makes it hard to see the pixels' colors. Instead, let's use some sort of outline AROUND the pixels. For simplicity, if its easier, it can just be a blue border around each pixel's square outline. That way we don't have to figure out how to "merge" the outlines around two adjacent pixels. Unless showing a "merged" outline is very easy, then we can just do it. This new way of presenting a set of selected pixels should apply not only to the Select tool, but in all other situations where a set of pixels is selected, eg, the "Select" button in the Color Quantization panel.
+
+5. Relatedly to (4), in the "Image Resize" panel, the green "proposed grid" gridlines are 1-px thick, which makes it hard to understand which "proposed pixel" does each "source pixel" belong to. It'd be nicer to use medium-thick green lines on the pixels' edges to display the gridlines of the "proposed grid".
+
+6. "Fill Sel" -- rename to "Fill Selection" and disable the button when there is no active selection.
+
+7. In "distinct colors" checkbox, make the "d" be a keyboard shortcut to toggle it.
+
+8. For keyboard shortcuts for Undo / Redo, make it "z" for Undo and "x" for Redo. Those are super common operations and it needs to be easy. Keep Cmd-z and Cmd-Shift-z though. And rename the button labels "Undo (z)" and "Redo (x)", with the z and x bold.
+
+9. In every number-selector UI, the up/down arrows don't display until I hover on them. Can you make them always visible?
+
+10. Undo / Redo should also reset the view / zoom level.
+
+11. Rename "Crop" to "Auto-Crop", and give it an available keyboard shortcut.
+
+12. Add a new "Crop to Selection" button that's only active when there's an active selection, that does the obvious thing.
+
+13. Unify the UI for "Zoom": Make it just a number UI, no need for the "+" and "-" buttons. But, we still need "-" and "=" keys to decrease / increase it. And can continue to still call it eg "zoom 21x" in the status bar in the lower-right.
+
+14. Regarding the current color selection -- the rgba(r,g,b,a) text that's next to the "Erase" button --
+
+15. Rename "Erase" to "Eraser" and move that button beside Pencil.
+
+16. Make comma and period be keyboard shortcuts to decreasing / increasing the Thickness.
+
+17. Rearrange the drawing tools to be: Pencil, Eraser, Line, Rect, Fill. Basically increasing by "pixel power".
+
+18. Clean up the UI by moving Pencil, Eraser, Line, Rect, and Fill into a new "Draw" panel. Also move into it the color-related UI stuff: current-color through all the color-swatches. Keyboard shortcut "d" to toggle that panel open/closed.
+
+19. Keyboard shortcut "c" to toggle open/closed the Color Quantization panel.
+
+20. Keyboard shortcut "i" to toggle open/closed the Image Resize panel. Change "Pick" so "k" is its keyboard shortcut.
+
+21. UI decision: If the user types a keyboard shortcut, it'd be nice to visually indicate which UI element was activated by that keyboard shortcut, with a short visual pulse or something. This visual pulse should happen even upon repeating the same keyboard shortcut, ie, if I do 'r' to select Rect, it it's actually already selected, I should still see a little pulse each time I type 'r'. And if the keyboard shortcut is for a button that's in a closed panel, open the panel.
+
+22. Keyboard shortcuts: 'n' for New, 'o' for Open, 'cmd-s' for Save. 
+
+23. Bug: 'e' selects Pencil for some reason?
+
+24. Default image when the app starts should be clawde-screenshot-2.png, to help the user start using the app right away.
+
+25. Bug: If I open a new file with Color Quantization panel open, it doesn't reflect the new image's values.
+
+26. Color Quantization panel's height should be resizable.
+
