@@ -32,13 +32,6 @@
   const redoStack = [];
   const MAX_UNDO  = 30;
 
-  const DEFAULT_PALETTE = [
-    '#000000', '#1d2b53', '#7e2553', '#008751',
-    '#ab5236', '#5f574f', '#c2c3c7', '#fff1e8',
-    '#ff004d', '#ffa300', '#ffec27', '#00e436',
-    '#29adff', '#83769c', '#ff77a8', '#ffccaa',
-  ];
-  let palette = DEFAULT_PALETTE.map(h => h + 'ff');
 
   // ---------- Color helpers ----------
   function hexToRgba(hex) {
@@ -49,10 +42,6 @@
     const b = parseInt(hex.slice(4, 6), 16);
     const a = hex.length >= 8 ? parseInt(hex.slice(6, 8), 16) : 255;
     return [r, g, b, a];
-  }
-  function rgbaToHex([r, g, b, a]) {
-    const h = n => n.toString(16).padStart(2, '0');
-    return '#' + h(r) + h(g) + h(b) + h(a);
   }
   function rgbToHex6([r, g, b]) {
     const h = n => n.toString(16).padStart(2, '0');
@@ -71,20 +60,13 @@
     distinctCanvas.height = h;
     hoverCanvas.width    = w;
     hoverCanvas.height   = h;
-    selectionCanvas.width  = w;
-    selectionCanvas.height = h;
-    resizeGridCanvas.width  = w;
-    resizeGridCanvas.height = h;
+    // Selection + resize grid overlays are sized in display pixels (set in
+    // applyZoom) so we can stroke crisp 2-3px lines along pixel boundaries.
     artCtx.imageSmoothingEnabled = false;
-    // The selection mask is sized to the old canvas; dropping it on any
-    // dimension change keeps subsequent operations safe.
     if (selection && selection.mask.length !== w * h) selection = null;
     applyZoom();
-    // The resize panel's collapsed header advertises the current canvas dims,
-    // so it must refresh whenever the canvas resizes from outside the panel
-    // (Apply, Crop, undo/redo, Open import). Guard for first call before the
-    // panel DOM and helper are wired.
     if (typeof renderResizeSummary === 'function') renderResizeSummary();
+    syncSelectionDependentUI();
   }
   function applyZoom() {
     const cssW = imgW * zoom;
@@ -97,14 +79,24 @@
     distinctCanvas.style.height = cssH + 'px';
     hoverCanvas.style.width    = cssW + 'px';
     hoverCanvas.style.height   = cssH + 'px';
+    // Display-resolution backing buffers for the overlays that draw lines on
+    // pixel edges. Reassigning .width/.height also clears the canvas, so the
+    // redraw calls below are required to put the strokes back.
+    selectionCanvas.width  = cssW;
+    selectionCanvas.height = cssH;
     selectionCanvas.style.width  = cssW + 'px';
     selectionCanvas.style.height = cssH + 'px';
+    resizeGridCanvas.width  = cssW;
+    resizeGridCanvas.height = cssH;
     resizeGridCanvas.style.width  = cssW + 'px';
     resizeGridCanvas.style.height = cssH + 'px';
     stage.style.width      = cssW + 'px';
     stage.style.height     = cssH + 'px';
     gridOverlay.style.setProperty('--cell', zoom + 'px');
-    $('#zoom-label').textContent = zoom + '×';
+    const zi = $('#zoom-input');
+    if (zi) zi.value = zoom;
+    drawSelectionFromMask();
+    if (typeof drawResizeGrid === 'function') drawResizeGrid();
     updateStatus();
   }
   function fitZoom() {
@@ -127,11 +119,6 @@
   }
 
   // ---------- Tool helpers ----------
-  // putImageData writes the exact RGBA we want; fillStyle+fillRect would
-  // round-trip through pre-multiplied alpha and lose precision at mid alphas.
-  // ctx/rgba default to the main canvas and the user's current color, so the
-  // overwhelming majority of callsites stay one-liners. The hover preview
-  // overrides both to draw into the overlay with its own marker color.
   const paintPixelBuf = artCtx.createImageData(1, 1);
   function paintPixel(x, y, ctx = artCtx, rgba = currentColor) {
     if (!inBounds(x, y)) return;
@@ -189,8 +176,10 @@
     const n = parseInt($('#shape-thickness').value, 10);
     return Math.max(1, Number.isFinite(n) ? n : 1);
   }
-  // Stamps a `size`×`size` square centred on (cx, cy). paintPixel handles
-  // out-of-bounds clipping so brushes near canvas edges just lose pixels.
+  function setThickness(n) {
+    const v = Math.max(1, Math.min(16, n | 0));
+    $('#shape-thickness').value = String(v);
+  }
   function stamp(cx, cy, size, ctx, rgba) {
     if (size <= 1) { paintPixel(cx, cy, ctx, rgba); return; }
     const half = Math.floor(size / 2);
@@ -225,8 +214,7 @@
   }
 
   // ---------- Tool registry ----------
-  // Each tool owns its drag state and exposes pointer lifecycle hooks.
-  // The canvas event handlers in "Drawing events" delegate to tools[currentTool].
+  const ERASER_RGBA = [0, 0, 0, 0];
   const tools = {
     pencil: {
       cursor: 'cell',
@@ -245,15 +233,37 @@
       },
       onUp()     { this.lastPx = null; },
       onCancel() { this.lastPx = null; },
-      // Hover preview: draws the about-to-paint pixels on #hover-overlay.
-      // For Erase (α=0) we'd otherwise stamp nothing — substitute a contrasting
-      // marker so the user can see where the cursor will erase.
       onHover(p) {
         clearHoverOverlay();
         const rgba = currentColor[3] === 0
-          ? [128, 128, 128, 180]   // erase marker
+          ? [128, 128, 128, 180]   // erase marker (zero-alpha pencil)
           : currentColor;
         stamp(p.x, p.y, getThickness(), hoverCtx, rgba);
+      },
+    },
+    eraser: {
+      // Pencil-shaped tool that always writes RGBA(0,0,0,0). Independent of
+      // the user's current color/alpha so switching to Pencil afterwards
+      // restores their palette pick.
+      cursor: 'cell',
+      lastPx: null,
+      onDown(p) {
+        pushUndo();
+        this.lastPx = p;
+        stamp(p.x, p.y, getThickness(), artCtx, ERASER_RGBA);
+      },
+      onMove(p) {
+        if (!this.lastPx) return;
+        if (this.lastPx.x === p.x && this.lastPx.y === p.y) return;
+        const size = getThickness();
+        lineBresenham(this.lastPx.x, this.lastPx.y, p.x, p.y, (x, y) => stamp(x, y, size, artCtx, ERASER_RGBA));
+        this.lastPx = p;
+      },
+      onUp()     { this.lastPx = null; },
+      onCancel() { this.lastPx = null; },
+      onHover(p) {
+        clearHoverOverlay();
+        stamp(p.x, p.y, getThickness(), hoverCtx, [220, 90, 90, 180]);
       },
     },
     fill: {
@@ -329,13 +339,12 @@
       onDown(p) {
         const mode = $('#selection-mode').value;
         if (mode === 'rect') {
-          // Rect waits for the drag to complete.
           this.start = p;
           selection = null;
           clearSelectionOverlay();
+          syncSelectionDependentUI();
           return;
         }
-        // All other modes commit immediately on click — they don't need a drag.
         let mask = null;
         if      (mode === 'row')        mask = buildRowMask(p.y);
         else if (mode === 'column')     mask = buildColumnMask(p.x);
@@ -344,22 +353,17 @@
         if (mask) {
           selection = { mask };
           drawSelectionFromMask();
+          syncSelectionDependentUI();
         }
       },
       onMove(p) {
         if (!this.start) return;
-        // onMove only matters for rect mode — non-rect modes commit in onDown
-        // and don't set this.start, so this guard short-circuits them.
         const minX = Math.min(this.start.x, p.x), maxX = Math.max(this.start.x, p.x);
         const minY = Math.min(this.start.y, p.y), maxY = Math.max(this.start.y, p.y);
-        clearSelectionOverlay();
-        for (let y = minY; y <= maxY; y++) {
-          for (let x = minX; x <= maxX; x++) {
-            if (x === minX || x === maxX || y === minY || y === maxY) {
-              paintPixel(x, y, selectionCtx, SELECTION_COLOR);
-            }
-          }
-        }
+        // Live drag preview: synthesize the rect mask each frame so the
+        // outline renderer can do the merged-edge stroke.
+        selection = { mask: buildRectMask(minX, minY, maxX, maxY) };
+        drawSelectionFromMask();
       },
       onUp(p) {
         if (!this.start) return;
@@ -367,12 +371,10 @@
         const minY = Math.min(this.start.y, p.y), maxY = Math.max(this.start.y, p.y);
         selection = { mask: buildRectMask(minX, minY, maxX, maxY) };
         drawSelectionFromMask();
+        syncSelectionDependentUI();
         this.start = null;
       },
       onCancel() {
-        // Only abandons an in-progress rect drag. The committed selection (if
-        // any) is dismissed by the global Esc handler — cancelling a drag
-        // doesn't accidentally wipe a prior selection the user is keeping.
         if (this.start) {
           this.start = null;
           drawSelectionFromMask();
@@ -385,8 +387,6 @@
     if (currentTool !== name) tools[currentTool]?.onDeactivate?.();
     currentTool = name;
     tools[name]?.onActivate?.();
-    // .tool-btn lives in both #tools and #color-section (Pick was moved next
-    // to the palette per prompt-2 item 17), so the active toggle is global.
     $$('.tool-btn').forEach(b =>
       b.classList.toggle('active', b.dataset.tool === name));
     artCanvas.style.cursor = tools[name]?.cursor ?? 'cell';
@@ -410,27 +410,31 @@
     if (!undoStack.length) return;
     redoStack.push(snapshot());
     restore(undoStack.pop());
+    fitZoom();
     updateStatus();
   }
   function redo() {
     if (!redoStack.length) return;
     undoStack.push(snapshot());
     restore(redoStack.pop());
+    fitZoom();
     updateStatus();
   }
 
   // ---------- Resize & crop ----------
-  // Manual nearest-neighbour resample with an integer OLD-pixel shift.
-  // Used by the in-canvas resize mode; mapping is deterministic so tests
-  // can predict which OLD pixel each NEW pixel samples from.
-  function resampleWithShift(newW, newH, shiftX, shiftY) {
+  // Nearest-neighbour downsample. Each output pixel (i,j) covers a cell of
+  // `cellW`×`cellH` source pixels and samples the source pixel at the cell's
+  // origin (`+shift`). In "output size" mode cellW = oldW/newW (a fraction);
+  // in "pixel size" mode cellW is the integer the user typed, so the grid
+  // cells are exactly that many source pixels wide/tall.
+  function resampleByCell(newW, newH, cellW, cellH, shiftX, shiftY) {
     const oldW = imgW, oldH = imgH;
     const src  = artCtx.getImageData(0, 0, oldW, oldH);
     const out  = new ImageData(newW, newH);
     for (let j = 0; j < newH; j++) {
       for (let i = 0; i < newW; i++) {
-        let sx = Math.floor(i * oldW / newW + shiftX);
-        let sy = Math.floor(j * oldH / newH + shiftY);
+        let sx = Math.floor(i * cellW + shiftX);
+        let sy = Math.floor(j * cellH + shiftY);
         sx = Math.max(0, Math.min(oldW - 1, sx));
         sy = Math.max(0, Math.min(oldH - 1, sy));
         const si = (sy * oldW + sx) * 4;
@@ -444,18 +448,46 @@
     setCanvasSize(newW, newH);
     artCtx.putImageData(out, 0, 0);
   }
+  // Auto-Crop trims a uniform border. The background colour is taken to be
+  // pixel (0,0) — covering both fully-transparent borders AND solid-colour
+  // backgrounds (e.g. the white border around the default mascot image).
+  // The crop box is the bounding box of every pixel that differs from it.
   function cropToContent() {
     const id = artCtx.getImageData(0, 0, imgW, imgH);
     const d  = id.data;
+    const br = d[0], bg = d[1], bb = d[2], ba = d[3];
     let minX = imgW, minY = imgH, maxX = -1, maxY = -1;
     for (let y = 0; y < imgH; y++) {
       for (let x = 0; x < imgW; x++) {
-        if (d[(y * imgW + x) * 4 + 3] !== 0) {
+        const i = (y * imgW + x) * 4;
+        if (d[i] !== br || d[i+1] !== bg || d[i+2] !== bb || d[i+3] !== ba) {
           if (x < minX) minX = x;
           if (y < minY) minY = y;
           if (x > maxX) maxX = x;
           if (y > maxY) maxY = y;
         }
+      }
+    }
+    if (maxX < 0) return false;   // whole image is the background colour
+    const newW = maxX - minX + 1;
+    const newH = maxY - minY + 1;
+    if (newW === imgW && newH === imgH) return false;
+    const cropped = artCtx.getImageData(minX, minY, newW, newH);
+    setCanvasSize(newW, newH);
+    artCtx.putImageData(cropped, 0, 0);
+    return true;
+  }
+  function cropToSelection() {
+    if (!selection) return false;
+    const m = selection.mask;
+    let minX = imgW, minY = imgH, maxX = -1, maxY = -1;
+    for (let y = 0; y < imgH; y++) {
+      for (let x = 0; x < imgW; x++) {
+        if (!m[y * imgW + x]) continue;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
       }
     }
     if (maxX < 0) return false;
@@ -539,25 +571,16 @@
       img.src = url;
     });
   }
-  function extractPalette(imageData, maxColors = 32) {
-    const d = imageData.data;
-    const counts = new Map();
-    for (let i = 0; i < d.length; i += 4) {
-      if (d[i + 3] < 128) continue;
-      const key = ((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]) >>> 0;
-      counts.set(key, (counts.get(key) || 0) + 1);
-    }
-    return Array.from(counts.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, maxColors)
-      .map(([key]) => rgbaToHex([(key >> 16) & 0xff, (key >> 8) & 0xff, key & 0xff, 255]));
+  function loadImageFromUrl(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload  = () => resolve(img);
+      img.onerror = () => reject(new Error('decode failed: ' + url));
+      img.src = url;
+    });
   }
-
   // ---- Pixel-set analysis ----
-  // A "pixel-set" is the set of all pixels in the image that share an exact
-  // RGBA. analyze() returns one entry per distinct RGBA, sorted by count desc.
-  // Fully-transparent pixels (α=0) are excluded — they're treated as "no
-  // color" and never participate in quantization or counts.
   function rgbaKey(r, g, b, a) { return r + ',' + g + ',' + b + ',' + a; }
   function parseKey(k)         { return k.split(',').map(Number); }
   function analyzePixelSets() {
@@ -574,8 +597,6 @@
   }
 
   // ---- LAB color space ----
-  // sRGB → linear → XYZ (D65) → L*a*b* (D65). Standard formulas; alpha is
-  // not represented in LAB and is handled separately in the quantize path.
   function srgbToLin(c) {
     const s = c / 255;
     return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
@@ -615,9 +636,6 @@
   }
 
   // ---- Weighted k-means in LAB ----
-  // Deterministic across runs: the PRNG seed is derived from the input
-  // points, so the same image always yields the same clustering. k-means++
-  // initialization plus Lloyd iterations.
   function mulberry32(seed) {
     return function() {
       let t = (seed = (seed + 0x6D2B79F5) >>> 0);
@@ -690,16 +708,6 @@
     return { centroids, labels, inertia };
   }
 
-  // ---- Quantized-colors derivation from k-means + snap mode ----
-  // For a given k-means result, derive the N quantized RGBAs the user will
-  // see. Two modes:
-  //   - Snap: each centroid is mapped to the closest existing pixel-set in
-  //     its cluster (preserves real image colors and alpha).
-  //   - Centroid: the centroid LAB is converted back to RGB and emitted at
-  //     α=255 (synthetic color, no alpha info available from the cluster).
-  // Returns { colors: [rgba[]], assignments: Map<srcKey, dstRgba[]> } where
-  // assignments map every pixel-set's key to the cluster color it would be
-  // remapped to (used to drive default dropdown choices in the table).
   function quantizedColorsFor(sets, kRes, snap) {
     const colors = [];
     const assignments = new Map();
@@ -726,14 +734,11 @@
     return { colors, assignments };
   }
 
-  // ---- Color quantization state + cache ----
-  const userOverrides = new Map();   // srcKey -> dst-color-index (into the current quantized list)
-  let selectedK = null;              // user's chosen k row (null = nothing picked yet)
-  let kmeansCache = null;            // { sig, sets, perK: [{k, kRes, snap, qColors, assignments, meanErr}] }
+  const userOverrides = new Map();
+  let selectedK = null;
+  let kmeansCache = null;
 
   function pixelSetsSignature(sets) {
-    // Hash of (key, count) pairs in sort order. If it matches the cache, we
-    // can reuse k-means results across renders.
     let h = 0xDEADBEEF;
     for (const s of sets) {
       for (let i = 0; i < s.key.length; i++) h = (h * 31 + s.key.charCodeAt(i)) >>> 0;
@@ -772,11 +777,7 @@
   }
   function invalidateKmeansCache() { kmeansCache = null; }
 
-  // ---- Apply mappings (atomic single-pass remap) ----
   function buildMappingsFromState(sets, qColors, assignments) {
-    // Map<srcKey, dst-rgba[]>. For each pixel-set: use the user's override if
-    // valid, else the k-means assignment. Identity entries (src color === dst
-    // color) are omitted as no-ops.
     const map = new Map();
     for (const { key, rgba } of sets) {
       let dst;
@@ -793,8 +794,6 @@
     return map;
   }
   function applyMappings(mappings) {
-    // Single-pass remap from a snapshot, so cycles like A→B + B→A behave as
-    // a swap (not an iteration to fixed point).
     if (mappings.size === 0) return false;
     const id = artCtx.getImageData(0, 0, imgW, imgH);
     const d  = id.data;
@@ -818,9 +817,6 @@
     return cache.perK[k - 1];
   }
 
-  // The new Quantize: applies the current k-means selection's mappings
-  // atomically, plus any per-row overrides. Then refreshes the global
-  // palette with the surviving quantized colors and clears overrides.
   function quantize() {
     const cache = ensureKmeansCache();
     if (cache.sets.length === 0) return;
@@ -828,8 +824,6 @@
     if (!bucket) return;
     const mappings = buildMappingsFromState(cache.sets, bucket.qColors, bucket.assignments);
     if (mappings.size > 0) applyMappings(mappings);
-    palette = bucket.qColors.filter(Boolean).map(rgbaToHex);
-    renderPalette();
     userOverrides.clear();
     invalidateKmeansCache();
     if (isQuantPanelExpanded()) renderQuantPanel();
@@ -842,14 +836,13 @@
   function setQuantPanelExpanded(open) {
     $('#quant-body').classList.toggle('hidden', !open);
     $('#btn-quant-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
-    if (open) renderQuantPanel();
+    if (open) { invalidateKmeansCache(); renderQuantPanel(); }
   }
   function renderQuantPanel() {
-    invalidateKmeansCache();   // Always recompute on explicit render — cheap for typical inputs.
+    invalidateKmeansCache();
     const cache = ensureKmeansCache();
     const sets  = cache.sets;
 
-    // Empty-state: nothing painted yet.
     const tbodyKm = $('#kmeans-table tbody');
     const tbodyPs = $('#pixel-sets-table tbody');
     tbodyKm.innerHTML = '';
@@ -868,21 +861,16 @@
     }
     $('#btn-quantize').disabled = false;
 
-    // Pre-select k = min(distinct, 8) on first render or when the prior pick
-    // is no longer valid (distinct count shrank).
     if (selectedK === null || selectedK > cache.perK.length) {
       selectedK = Math.min(cache.perK.length, 8);
     }
 
-    // Prune dead overrides (src no longer exists or override index out of
-    // range for the current quantized list).
     const srcSet = new Set(sets.map(s => s.key));
     const curBucket = cache.perK[selectedK - 1];
     for (const [src, idx] of userOverrides) {
       if (!srcSet.has(src) || idx >= curBucket.qColors.length) userOverrides.delete(src);
     }
 
-    // ----- K-means table -----
     for (const bucket of cache.perK) {
       const tr = document.createElement('tr');
       tr.dataset.k = bucket.k;
@@ -923,22 +911,16 @@
       tbodyKm.appendChild(tr);
     }
 
-    // ----- Header summary -----
     const k = selectedK;
     $('#quant-summary').textContent =
       `${sets.length} distinct color${sets.length === 1 ? '' : 's'} · k = ${k} · mode: ${snapChecked() ? 'snap' : 'centroid'}`;
     $('#pixel-sets-summary').textContent =
       `${sets.length} distinct · k = ${k} cluster${k === 1 ? '' : 's'}`;
 
-    // ----- Pixel-sets table -----
     const qColors = curBucket.qColors;
-    // Per-pixel-set: which cluster index does it land in?
     const clusterIdxByKey = new Map();
     for (let i = 0; i < sets.length; i++) clusterIdxByKey.set(sets[i].key, curBucket.kRes.labels[i]);
 
-    // Quantized-color row indices in the pixel-sets table (only meaningful in
-    // snap mode, where each qColor IS an existing pixel-set). In snap mode
-    // this maps qColor → 1-based row index; in centroid mode it's "C{n}".
     const qLabels = qColors.map((c, n) => {
       if (!c) return `C${n + 1}`;
       if (!snapChecked()) return `C${n + 1}`;
@@ -956,9 +938,6 @@
       const tr = document.createElement('tr');
       tr.dataset.srcKey = key;
       tr.dataset.rowIdx = rowIdx + 1;
-      // A pixel-set is "quantized" (i.e. in the surviving palette) if its
-      // color equals one of the qColors. In snap mode this happens for the
-      // chosen-pixel-set rows; in centroid mode it almost never happens.
       const isQ = qColors.some(c => c && c[0] === rgba[0] && c[1] === rgba[1] && c[2] === rgba[2] && c[3] === rgba[3]);
       if (isQ) tr.classList.add('is-quantized');
 
@@ -987,6 +966,7 @@
       selectBtn.addEventListener('click', () => {
         selection = { mask: buildSameRgbaMask(rgba[0], rgba[1], rgba[2], rgba[3]) };
         drawSelectionFromMask();
+        syncSelectionDependentUI();
       });
       tdSelect.appendChild(selectBtn);
 
@@ -1044,43 +1024,13 @@
   }
   function selectK(k) {
     selectedK = k;
-    userOverrides.clear();  // Overrides reference cluster indices that change when k changes.
+    userOverrides.clear();
     renderQuantPanel();
   }
 
-  // ---------- Palette UI ----------
-  function renderPalette() {
-    const el = $('#palette');
-    el.innerHTML = '';
-    palette.forEach((hex, i) => {
-      const [r, g, b, a] = hexToRgba(hex);
-      const sw = document.createElement('button');
-      sw.type = 'button';
-      sw.className = 'swatch';
-      sw.style.setProperty('--swatch-color', `rgba(${r},${g},${b},${a/255})`);
-      sw.title = hex + '  (right-click to remove)';
-      sw.addEventListener('click', () => setColorFromHex(hex));
-      sw.addEventListener('contextmenu', e => {
-        e.preventDefault();
-        palette.splice(i, 1);
-        renderPalette();
-      });
-      el.appendChild(sw);
-    });
-    const add = document.createElement('button');
-    add.type = 'button';
-    add.className = 'swatch add-swatch';
-    add.textContent = '+';
-    add.title = 'Add current color to palette';
-    add.addEventListener('click', () => {
-      const hex = rgbaToHex(currentColor);
-      if (!palette.includes(hex)) { palette.push(hex); renderPalette(); }
-    });
-    el.appendChild(add);
-  }
+  // ---------- Current-color UI ----------
   function setColorFromHex(hex) {
     const [r, g, b, a] = hexToRgba(hex);
-    // hex-6/3 carries no alpha — preserve the user's current alpha.
     const hasAlpha = hex.replace('#', '').length >= 8;
     currentColor = [r, g, b, hasAlpha ? a : currentColor[3]];
     syncColorUI();
@@ -1099,11 +1049,6 @@
     currentColor[3] = Math.max(0, Math.min(255, a | 0));
     syncColorUI();
   }
-  function eraseMode() {
-    currentColor[3] = 0;
-    syncColorUI();
-    setTool('pencil');
-  }
 
   // ---------- Hover overlay ----------
   function clearHoverOverlay() {
@@ -1111,25 +1056,25 @@
   }
 
   // ---------- Selection ----------
-  // selection is global (persists across tool switches) so the user can make
-  // a selection then switch to Pencil etc. without losing it. Esc dismisses.
-  // Internally it's a per-pixel mask (Uint8Array of length imgW*imgH); 1 means
-  // selected. This shape supports rectangular, row, column, contiguous, and
-  // same-color selections uniformly.
-  let selection = null;  // null or { mask: Uint8Array }
-  const SELECTION_COLOR = [80, 140, 240, 220];
+  let selection = null;
+  const SELECTION_OUTLINE_COLOR = 'rgba(60, 120, 255, 0.95)';
 
   function clearSelectionOverlay() {
-    selectionCtx.clearRect(0, 0, imgW, imgH);
+    selectionCtx.clearRect(0, 0, selectionCanvas.width, selectionCanvas.height);
   }
   function clearSelection() {
     selection = null;
     clearSelectionOverlay();
+    syncSelectionDependentUI();
   }
   function buildRectMask(minX, minY, maxX, maxY) {
     const m = new Uint8Array(imgW * imgH);
-    for (let y = minY; y <= maxY; y++)
-      for (let x = minX; x <= maxX; x++)
+    const x0 = Math.max(0, Math.min(imgW - 1, minX));
+    const x1 = Math.max(0, Math.min(imgW - 1, maxX));
+    const y0 = Math.max(0, Math.min(imgH - 1, minY));
+    const y1 = Math.max(0, Math.min(imgH - 1, maxY));
+    for (let y = y0; y <= y1; y++)
+      for (let x = x0; x <= x1; x++)
         m[y * imgW + x] = 1;
     return m;
   }
@@ -1187,13 +1132,21 @@
     }
     return m;
   }
+  // Draws a merged outline along the boundary of the selection in display
+  // pixels: for each selected pixel, stroke the side(s) whose neighbour is
+  // NOT selected. Line thickness scales with zoom so the outline stays
+  // visible at any zoom level without obscuring the pixel colours inside.
   function drawSelectionFromMask() {
     clearSelectionOverlay();
     if (!selection) return;
     const m = selection.mask;
-    // Contour pass: any selected pixel with at least one non-selected neighbour
-    // (incl. out-of-bounds) is on the outline. For a solid rect this yields
-    // the border; for irregular shapes it traces them naturally.
+    if (!m || m.length !== imgW * imgH) return;
+    const z = zoom;
+    const thickness = Math.max(2, Math.min(6, Math.round(z / 4)));
+    selectionCtx.lineWidth = thickness;
+    selectionCtx.strokeStyle = SELECTION_OUTLINE_COLOR;
+    selectionCtx.lineCap = 'square';
+    selectionCtx.beginPath();
     for (let y = 0; y < imgH; y++) {
       for (let x = 0; x < imgW; x++) {
         if (!m[y * imgW + x]) continue;
@@ -1201,11 +1154,14 @@
         const bot = y < imgH - 1    ? m[(y + 1) * imgW + x] : 0;
         const lef = x > 0           ? m[y * imgW + (x - 1)] : 0;
         const rig = x < imgW - 1    ? m[y * imgW + (x + 1)] : 0;
-        if (!top || !bot || !lef || !rig) {
-          paintPixel(x, y, selectionCtx, SELECTION_COLOR);
-        }
+        const px = x * z, py = y * z;
+        if (!top) { selectionCtx.moveTo(px,         py); selectionCtx.lineTo(px + z, py); }
+        if (!bot) { selectionCtx.moveTo(px,         py + z); selectionCtx.lineTo(px + z, py + z); }
+        if (!lef) { selectionCtx.moveTo(px,         py); selectionCtx.lineTo(px,     py + z); }
+        if (!rig) { selectionCtx.moveTo(px + z,     py); selectionCtx.lineTo(px + z, py + z); }
       }
     }
+    selectionCtx.stroke();
   }
   function applyToSelection(fn) {
     if (!selection) return;
@@ -1227,9 +1183,15 @@
     const [r, g, b, a] = currentColor;
     applyToSelection((d, i) => { d[i] = r; d[i+1] = g; d[i+2] = b; d[i+3] = a; });
   }
+  function syncSelectionDependentUI() {
+    const has = !!selection;
+    const fs = $('#btn-fill-selection');
+    const cs = $('#btn-crop-selection');
+    if (fs) fs.disabled = !has;
+    if (cs) cs.disabled = !has;
+  }
 
   // ---------- Alpha-as-grayscale preview ----------
-  // Photoshop convention: white = opaque, black = transparent.
   function refreshAlphaPreview() {
     const src = artCtx.getImageData(0, 0, imgW, imgH);
     const out = previewCtx.createImageData(imgW, imgH);
@@ -1244,8 +1206,6 @@
   }
   function setAlphaPreview(on) {
     if (on) {
-      // The two previews replace the art view, so only one can be visible at a
-      // time — flipping one on flips the other off.
       if (!distinctCanvas.classList.contains('hidden')) {
         $('#distinct-preview').checked = false;
         setDistinctPreview(false);
@@ -1260,10 +1220,6 @@
   }
 
   // ---------- Distinct-colors preview ----------
-  // High-contrast palette assigned in scan-order: the first unique RGBA
-  // encountered becomes red, the second green, etc. Fully-transparent pixels
-  // stay transparent so blank regions remain visible. Cycles past the palette
-  // length if the image has more unique colors.
   const DISTINCT_PALETTE = [
     [255,   0,   0], [  0, 200,   0], [  0,   0, 255], [255, 220,   0],
     [255,   0, 255], [  0, 220, 220], [255, 140,   0], [140,   0, 255],
@@ -1308,9 +1264,6 @@
     }
   }
 
-  // Re-render whichever preview is currently visible after a canvas mutation.
-  // Also re-renders the pixel-sets panel if it's open, since pixel counts and
-  // distinct-color set change with every edit.
   function refreshPreviews() {
     if (!previewCanvas.classList.contains('hidden')) refreshAlphaPreview();
     if (!distinctCanvas.classList.contains('hidden')) refreshDistinctPreview();
@@ -1331,8 +1284,6 @@
   }
 
   // ---------- Drawing events ----------
-  // Thin dispatcher: pointer lifecycle is forwarded to the current tool.
-  // Right-click pick stays a global behaviour, not tool-routed.
   let activeStroke = false;
   artCanvas.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
@@ -1372,16 +1323,31 @@
     if (inBounds(p.x, p.y)) pickColor(p.x, p.y, false);
   });
 
+  // ---------- Pulse helper ----------
+  // Brief visual feedback when a keyboard shortcut activates a UI element.
+  // Re-triggers cleanly on repeat keys by toggling the class off and forcing
+  // a reflow before re-adding it.
+  function pulse(el) {
+    if (!el) return;
+    el.classList.remove('pulse');
+    void el.offsetWidth;
+    el.classList.add('pulse');
+    setTimeout(() => el.classList.remove('pulse'), 500);
+  }
+
   // ---------- Top bar wiring ----------
   $$('.tool-btn').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
   $('#current-color').addEventListener('input', (e) => setColorFromHex(e.target.value));
   $('#alpha-slider').addEventListener('input', (e) => setAlpha(parseInt(e.target.value, 10)));
   $('#alpha-number').addEventListener('input', (e) => setAlpha(parseInt(e.target.value, 10)));
-  $('#btn-eraser').addEventListener('click', eraseMode);
   $('#btn-undo').addEventListener('click', undo);
   $('#btn-redo').addEventListener('click', redo);
-  $('#btn-zoom-in') .addEventListener('click', () => { zoom = Math.min(MAX_ZOOM, zoom + 1); applyZoom(); });
-  $('#btn-zoom-out').addEventListener('click', () => { zoom = Math.max(MIN_ZOOM, zoom - 1); applyZoom(); });
+  $('#zoom-input').addEventListener('input', (e) => {
+    const n = parseInt(e.target.value, 10);
+    if (!Number.isFinite(n)) return;
+    zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, n));
+    applyZoom();
+  });
   $('#grid-toggle').addEventListener('change', (e) => gridOverlay.classList.toggle('hidden', !e.target.checked));
   $('#alpha-preview').addEventListener('change', (e) => setAlphaPreview(e.target.checked));
   $('#distinct-preview').addEventListener('change', (e) => setDistinctPreview(e.target.checked));
@@ -1389,7 +1355,32 @@
   $('#btn-quantize').addEventListener('click', quantize);
   $('#btn-quant-toggle').addEventListener('click', () => setQuantPanelExpanded(!isQuantPanelExpanded()));
   $('#kmeans-snap').addEventListener('change', () => { invalidateKmeansCache(); if (isQuantPanelExpanded()) renderQuantPanel(); });
-  $('#btn-fill-selection').addEventListener('click', recolorSelection);
+  $('#btn-fill-selection').addEventListener('click', () => { if (selection) recolorSelection(); });
+  $('#btn-crop-selection').addEventListener('click', () => {
+    if (!selection) return;
+    pushUndo();
+    if (!cropToSelection()) { undoStack.pop(); return; }
+    clearSelection();
+    fitZoom();
+  });
+
+  // ---------- Draw panel ----------
+  function isDrawPanelExpanded() {
+    return !$('#draw-body').classList.contains('hidden');
+  }
+  function setDrawPanelExpanded(open) {
+    $('#draw-body').classList.toggle('hidden', !open);
+    $('#btn-draw-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+    renderDrawSummary();
+  }
+  function renderDrawSummary() {
+    const sum = $('#draw-summary');
+    if (!sum) return;
+    if (isDrawPanelExpanded()) { sum.textContent = ''; return; }
+    const [r, g, b, a] = currentColor;
+    sum.textContent = `tool: ${currentTool} · rgba(${r}, ${g}, ${b}, ${a})`;
+  }
+  $('#btn-draw-toggle').addEventListener('click', () => setDrawPanelExpanded(!isDrawPanelExpanded()));
 
   // ---------- New ----------
   $('#btn-new').addEventListener('click', () => {
@@ -1404,6 +1395,7 @@
     pushUndo();
     setCanvasSize(w, h);
     fitZoom();
+    refreshPreviews();
   });
   function clampDim(v, fallback) {
     const n = parseInt(v, 10);
@@ -1503,109 +1495,149 @@
     setCanvasSize(w, h);
     artCtx.imageSmoothingEnabled = false;
     artCtx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, 0, 0, w, h);
-    if ($('#import-extract-palette').checked) {
-      const extracted = extractPalette(artCtx.getImageData(0, 0, w, h), 32);
-      if (extracted.length) { palette = extracted; renderPalette(); }
-    }
     fitZoom();
+    refreshPreviews();
+    if (isQuantPanelExpanded()) { invalidateKmeansCache(); renderQuantPanel(); }
     importImg = null;
   });
 
   // ---------- Image Resize panel ----------
-  // The panel mirrors the Color Quantization pattern: a collapsible section
-  // below the toolbar, with a live summary in the always-visible header. The
-  // body holds W / H / aspect / shift inputs plus Apply. Expanding the panel
-  // enters "resize mode" (grid overlay shown); collapsing exits it.
-  const RESIZE_GRID_COLOR = [40, 200, 70, 220];
+  const RESIZE_GRID_COLOR = 'rgba(40, 180, 70, 0.95)';
   let resizeMode = false;
 
   function isResizePanelExpanded() {
     return !$('#resize-body').classList.contains('hidden');
   }
+  function getResizeMode() {
+    return $('#resize-mode').value === 'pixel' ? 'pixel' : 'output';
+  }
+  // Resolves the panel inputs into a concrete resize plan regardless of mode:
+  //   w, h   — output dimensions, in pixels
+  //   cw, ch — size of ONE output pixel, measured in current pixels (this is
+  //            the grid cell size, and the source step the resample takes).
+  // Output-size mode: user types w/h, so cw = imgW/w (usually fractional).
+  // Pixel-size  mode: user types cw/ch directly (exact integer cells), so
+  //                   w = ceil(imgW/cw) — the final cell may be partial.
   function getResizeParams() {
-    const w  = clampDim($('#resize-w').value, imgW);
-    const h  = clampDim($('#resize-h').value, imgH);
     const sx = parseInt($('#resize-shift-x').value, 10) || 0;
     const sy = parseInt($('#resize-shift-y').value, 10) || 0;
-    return { w, h, sx, sy };
+    if (getResizeMode() === 'pixel') {
+      const cw = Math.max(1, clampDim($('#resize-px-w').value, 1));
+      const ch = Math.max(1, clampDim($('#resize-px-h').value, 1));
+      const w  = Math.max(1, Math.ceil(imgW / cw));
+      const h  = Math.max(1, Math.ceil(imgH / ch));
+      return { mode: 'pixel', w, h, cw, ch, sx, sy };
+    }
+    const w = clampDim($('#resize-w').value, imgW);
+    const h = clampDim($('#resize-h').value, imgH);
+    return { mode: 'output', w, h, cw: imgW / w, ch: imgH / h, sx, sy };
   }
+  // The "proposed grid" is drawn on the display-resolution overlay as
+  // medium-thick lines on the cell boundaries, so each block of current
+  // pixels is visually grouped into the new pixel it would sample from.
   function drawResizeGrid() {
-    resizeGridCtx.clearRect(0, 0, imgW, imgH);
+    resizeGridCtx.clearRect(0, 0, resizeGridCanvas.width, resizeGridCanvas.height);
     if (!resizeMode) return;
-    const { w: newW, h: newH, sx: shiftX, sy: shiftY } = getResizeParams();
-    const cellW = imgW / newW;
-    const cellH = imgH / newH;
+    const { w: newW, h: newH, cw: cellW, ch: cellH, sx: shiftX, sy: shiftY } = getResizeParams();
+    const z = zoom;
+    resizeGridCtx.strokeStyle = RESIZE_GRID_COLOR;
+    resizeGridCtx.lineWidth = Math.max(2, Math.min(6, Math.round(z / 4)));
+    resizeGridCtx.lineCap = 'square';
+    resizeGridCtx.beginPath();
+    const W = imgW * z, H = imgH * z;
     for (let j = 0; j <= newW; j++) {
-      const x = Math.floor(j * cellW + shiftX);
-      if (x < 0 || x >= imgW) continue;
-      for (let y = 0; y < imgH; y++) paintPixel(x, y, resizeGridCtx, RESIZE_GRID_COLOR);
+      const xCanvas = Math.round((j * cellW + shiftX) * z);
+      if (xCanvas < 0 || xCanvas > W) continue;
+      resizeGridCtx.moveTo(xCanvas, 0);
+      resizeGridCtx.lineTo(xCanvas, H);
     }
     for (let j = 0; j <= newH; j++) {
-      const y = Math.floor(j * cellH + shiftY);
-      if (y < 0 || y >= imgH) continue;
-      for (let x = 0; x < imgW; x++) paintPixel(x, y, resizeGridCtx, RESIZE_GRID_COLOR);
+      const yCanvas = Math.round((j * cellH + shiftY) * z);
+      if (yCanvas < 0 || yCanvas > H) continue;
+      resizeGridCtx.moveTo(0,  yCanvas);
+      resizeGridCtx.lineTo(W,  yCanvas);
     }
+    resizeGridCtx.stroke();
   }
   function renderResizeSummary() {
-    // Always-visible header text. When the panel is collapsed or the user
-    // hasn't changed anything, just show the current dims. When pending
-    // changes exist, show the "from → to" plus aspect/shift modifiers.
     const sum = $('#resize-summary');
     const expanded = isResizePanelExpanded();
     if (!expanded) {
       sum.textContent = `${imgW}×${imgH}`;
       return;
     }
-    const { w, h, sx, sy } = getResizeParams();
+    const { mode, w, h, sx, sy } = getResizeParams();
     const noChange = w === imgW && h === imgH && sx === 0 && sy === 0;
     if (noChange) {
       sum.textContent = `${imgW}×${imgH} (no pending change)`;
       return;
     }
     const parts = [`${imgW}×${imgH} → ${w}×${h}`];
-    if ($('#resize-keep-aspect').checked) parts.push('aspect locked');
-    if (sx !== 0 || sy !== 0)             parts.push(`shift ${sx},${sy}`);
+    if (mode === 'pixel') {
+      parts.push(`pixel ${$('#resize-px-w').value}×${$('#resize-px-h').value}`);
+    } else if ($('#resize-keep-aspect').checked) {
+      parts.push('aspect locked');
+    }
+    if (sx !== 0 || sy !== 0) parts.push(`shift ${sx},${sy}`);
     sum.textContent = parts.join(' · ');
+  }
+  function syncResizeModeFields() {
+    const pixel = getResizeMode() === 'pixel';
+    $('#resize-output-fields').classList.toggle('hidden', pixel);
+    $('#resize-pixel-fields').classList.toggle('hidden', !pixel);
   }
   function setResizePanelExpanded(open) {
     $('#resize-body').classList.toggle('hidden', !open);
     $('#btn-resize-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) {
-      // Re-initialise inputs to the current canvas state so the body always
-      // starts from a clean "no pending change" baseline.
-      $('#resize-w').value = imgW;
-      $('#resize-h').value = imgH;
+      // Start in output-size mode each expand, defaulting output W/H to
+      // one-fifth of the current dimensions so the overlay doesn't have to
+      // draw thousands of gridlines. Pixel-size fields get a sane default
+      // (5) for the same reason.
+      $('#resize-mode').value = 'output';
+      const defaultW = Math.max(1, Math.round(imgW / 5));
+      const ratio = imgW / imgH;
+      const defaultH = $('#resize-keep-aspect').checked
+        ? Math.max(1, Math.round(defaultW / ratio))
+        : Math.max(1, Math.round(imgH / 5));
+      $('#resize-w').value = defaultW;
+      $('#resize-h').value = defaultH;
+      $('#resize-px-w').value = 5;
+      $('#resize-px-h').value = 5;
       $('#resize-shift-x').value = 0;
       $('#resize-shift-y').value = 0;
+      syncResizeModeFields();
       resizeMode = true;
       drawResizeGrid();
     } else {
       resizeMode = false;
-      resizeGridCtx.clearRect(0, 0, imgW, imgH);
+      resizeGridCtx.clearRect(0, 0, resizeGridCanvas.width, resizeGridCanvas.height);
     }
     renderResizeSummary();
   }
   function applyResize() {
     if (!resizeMode) return;
-    const { w, h, sx, sy } = getResizeParams();
+    const { w, h, cw, ch, sx, sy } = getResizeParams();
     if (w === imgW && h === imgH && sx === 0 && sy === 0) {
       setResizePanelExpanded(false);
       return;
     }
     pushUndo();
-    resampleWithShift(w, h, sx, sy);
+    resampleByCell(w, h, cw, ch, sx, sy);
     fitZoom();
     setResizePanelExpanded(false);
     refreshPreviews();
   }
-  // Back-compat alias: code paths elsewhere (keyboard Esc, undo/redo restore)
-  // call exitResizeMode() to dismiss the in-canvas overlay. Route through the
-  // panel toggle so the header summary stays in sync.
   function exitResizeMode() { setResizePanelExpanded(false); }
 
   $('#btn-resize-toggle').addEventListener('click', () => setResizePanelExpanded(!isResizePanelExpanded()));
   $('#btn-resize-apply').addEventListener('click', applyResize);
 
+  $('#resize-mode').addEventListener('change', () => {
+    syncResizeModeFields();
+    drawResizeGrid();
+    renderResizeSummary();
+  });
   $('#resize-w').addEventListener('input', () => {
     if ($('#resize-keep-aspect').checked) {
       const ratio = imgW / imgH;
@@ -1624,11 +1656,32 @@
     drawResizeGrid();
     renderResizeSummary();
   });
-  $('#resize-shift-x').addEventListener('input', () => { drawResizeGrid(); renderResizeSummary(); });
-  $('#resize-shift-y').addEventListener('input', () => { drawResizeGrid(); renderResizeSummary(); });
+  const onResizeInput = () => { drawResizeGrid(); renderResizeSummary(); };
+  // In pixel-size mode the "Lock aspect" checkbox keeps the resized pixel
+  // square — editing one dimension mirrors it to the other.
+  $('#resize-px-w').addEventListener('input', () => {
+    if ($('#resize-px-keep-aspect').checked) {
+      $('#resize-px-h').value = clampDim($('#resize-px-w').value, 1);
+    }
+    onResizeInput();
+  });
+  $('#resize-px-h').addEventListener('input', () => {
+    if ($('#resize-px-keep-aspect').checked) {
+      $('#resize-px-w').value = clampDim($('#resize-px-h').value, 1);
+    }
+    onResizeInput();
+  });
+  $('#resize-px-keep-aspect').addEventListener('change', () => {
+    // Turning the lock on squares the pixel immediately (H follows W).
+    if ($('#resize-px-keep-aspect').checked) {
+      $('#resize-px-h').value = clampDim($('#resize-px-w').value, 1);
+    }
+    onResizeInput();
+  });
+  $('#resize-shift-x').addEventListener('input', onResizeInput);
+  $('#resize-shift-y').addEventListener('input', onResizeInput);
   $('#resize-keep-aspect').addEventListener('change', renderResizeSummary);
 
-  // First render so the collapsed header shows the initial dims.
   renderResizeSummary();
 
   // ---------- Crop ----------
@@ -1639,30 +1692,98 @@
   });
 
   // ---------- Keyboard ----------
+  function toggleCheckboxWithChange(id) {
+    const cb = $(id);
+    cb.checked = !cb.checked;
+    cb.dispatchEvent(new Event('change'));
+    return cb;
+  }
   document.addEventListener('keydown', (e) => {
     if (e.target.matches('input, textarea, select')) return;
     const k = e.key.toLowerCase();
+
     if ((e.metaKey || e.ctrlKey) && k === 'z') {
       e.preventDefault();
-      if (e.shiftKey) redo(); else undo();
+      if (e.shiftKey) { redo(); pulse($('#btn-redo')); }
+      else            { undo(); pulse($('#btn-undo')); }
       return;
     }
-    if ((e.metaKey || e.ctrlKey) && k === 'y') { e.preventDefault(); redo(); return; }
+    if ((e.metaKey || e.ctrlKey) && k === 'y') { e.preventDefault(); redo(); pulse($('#btn-redo')); return; }
+    if ((e.metaKey || e.ctrlKey) && k === 's') {
+      e.preventDefault();
+      saveImage($('#save-format').value);
+      pulse($('#btn-save'));
+      return;
+    }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+
     switch (k) {
-      case 'p': setTool('pencil'); break;
-      case 'e': eraseMode();       break;
-      case 'f': setTool('fill');   break;
-      case 'i': setTool('picker'); break;
-      case 'r': setTool('rect');   break;
-      case 'l': setTool('line');   break;
-      case 's': setTool('select'); break;
-      case 'u': undo();            break;
+      case 'p': setTool('pencil'); pulse($('[data-tool="pencil"]')); break;
+      case 'e': setTool('eraser'); pulse($('[data-tool="eraser"]')); break;
+      case 'f': setTool('fill');   pulse($('[data-tool="fill"]'));   break;
+      case 'k': setTool('picker'); pulse($('[data-tool="picker"]')); break;
+      case 'r': setTool('rect');   pulse($('[data-tool="rect"]'));   break;
+      case 'l': setTool('line');   pulse($('[data-tool="line"]'));   break;
+      case 's': setTool('select'); pulse($('[data-tool="select"]')); break;
+      case 'z': undo(); pulse($('#btn-undo')); break;
+      case 'x': redo(); pulse($('#btn-redo')); break;
+      case 'y':
+        $('#btn-crop').click();
+        pulse($('#btn-crop'));
+        break;
+      case 'v':
+        saveImage($('#save-format').value);
+        pulse($('#btn-save'));
+        break;
+      case 'n':
+        $('#btn-new').click();
+        pulse($('#btn-new'));
+        break;
+      case 'o':
+        $('#btn-open').click();
+        pulse($('#btn-open'));
+        break;
+      case 'a':
+        toggleCheckboxWithChange('#alpha-preview');
+        pulse($('#alpha-preview').closest('label'));
+        break;
+      case 't':
+        toggleCheckboxWithChange('#distinct-preview');
+        pulse($('#distinct-preview').closest('label'));
+        break;
+      case 'g':
+        toggleCheckboxWithChange('#grid-toggle');
+        pulse($('#grid-toggle').closest('label'));
+        break;
+      case 'c':
+        // Crop to Selection — no-op (button stays disabled) without a selection.
+        if (selection) { $('#btn-crop-selection').click(); pulse($('#btn-crop-selection')); }
+        break;
+      case 'd':
+        setDrawPanelExpanded(!isDrawPanelExpanded());
+        pulse($('#btn-draw-toggle'));
+        break;
+      case 'q':
+        setQuantPanelExpanded(!isQuantPanelExpanded());
+        pulse($('#btn-quant-toggle'));
+        break;
+      case 'i':
+        setResizePanelExpanded(!isResizePanelExpanded());
+        pulse($('#btn-resize-toggle'));
+        break;
+      case ',':
+        setThickness(getThickness() - 1);
+        pulse($('#shape-thickness'));
+        break;
+      case '.':
+        setThickness(getThickness() + 1);
+        pulse($('#shape-thickness'));
+        break;
       case 'delete': case 'backspace':
         if (selection) { deleteSelection(); e.preventDefault(); }
         break;
       case 'enter':
-        if (selection) { recolorSelection(); e.preventDefault(); }
+        if (selection) { recolorSelection(); pulse($('#btn-fill-selection')); e.preventDefault(); }
         break;
       case 'escape':
         activeStroke = false;
@@ -1671,23 +1792,44 @@
         if (resizeMode) exitResizeMode();
         break;
       case '=': case '+':
-        zoom = Math.min(MAX_ZOOM, zoom + 1); applyZoom(); break;
-      case '-': case '_':
-        zoom = Math.max(MIN_ZOOM, zoom - 1); applyZoom(); break;
-      case 'g': {
-        const cb = $('#grid-toggle');
-        cb.checked = !cb.checked;
-        cb.dispatchEvent(new Event('change'));
+        zoom = Math.min(MAX_ZOOM, zoom + 1); applyZoom();
+        pulse($('#zoom-input'));
         break;
-      }
+      case '-': case '_':
+        zoom = Math.max(MIN_ZOOM, zoom - 1); applyZoom();
+        pulse($('#zoom-input'));
+        break;
     }
   });
 
   // ---------- Init ----------
   syncColorUI();
-  renderPalette();
   setCanvasSize(32, 32);
   setTool('pencil');
   fitZoom();
   updateStatus();
+  syncSelectionDependentUI();
+
+  // Default startup image — load asynchronously so the app is interactive
+  // immediately. Skipped when the app is hosted inside an iframe (the test
+  // harness loads it that way and expects a blank canvas to start).
+  function inIframe() {
+    try { return window.self !== window.top; }
+    catch (_) { return true; }
+  }
+  if (!inIframe()) {
+    loadImageFromUrl('assets/clawde-screenshot-2.png')
+      .then((img) => {
+        const w = img.naturalWidth, h = img.naturalHeight;
+        setCanvasSize(w, h);
+        artCtx.imageSmoothingEnabled = false;
+        artCtx.drawImage(img, 0, 0);
+        fitZoom();
+        refreshPreviews();
+      })
+      .catch(() => {
+        // Silent fallback: an empty 32×32 canvas is fine if the asset is
+        // missing or blocked.
+      });
+  }
 })();

@@ -24,14 +24,14 @@
   window.scenarios = [
     {
       label: '01-initial',
-      description: 'Fresh reload — defaults check (α=255, pencil, 16-swatch palette, empty canvas).',
+      description: 'Fresh reload — defaults check (α=255, pencil, empty 32×32 canvas, no palette grid).',
       run: async () => {},
       assertions: (app) => [
         ['α slider',                  app.q('#alpha-slider').value,                                '255'],
         ['α number',                  app.q('#alpha-number').value,                                '255'],
         ['color picker',              app.q('#current-color').value,                               '#cb6e4a'],
         ['active tool',               app.q('#tools .tool-btn.active').dataset.tool,               'pencil'],
-        ['palette size',              app.qa('#palette .swatch:not(.add-swatch)').length,          16],
+        ['palette grid removed',      !!app.q('#palette'),                                         false],
         ['canvas cursor',             app.canvas.style.cursor,                                     'cell'],
         ['canvas width',              app.canvas.width,                                            32],
         ['canvas height',             app.canvas.height,                                           32],
@@ -84,12 +84,12 @@
 
     {
       label: '05-erase-button',
-      description: 'Click Erase, click (4,4) — punches a transparent hole; tool stays pencil.',
+      description: 'Click Eraser button → selects Eraser tool (no longer mutates α). Click (4,4) — punches a transparent hole regardless of current α.',
       chain: true,
       run: async (app) => { app.pressErase(); app.click(4, 4); },
       assertions: (app) => [
-        ['α slider',                 app.q('#alpha-slider').value,                  '0'],
-        ['active tool',              app.q('#tools .tool-btn.active').dataset.tool, 'pencil'],
+        ['α slider unchanged',       app.q('#alpha-slider').value,                  '128'],
+        ['active tool',              app.q('.tool-btn.active').dataset.tool,        'eraser'],
         ['pixel (4,4) erased',       app.pix(4, 4),                                 TRANSPARENT],
         ['pixel (5,5) still opaque', app.pix(5, 5),                                 ORANGE],
       ],
@@ -97,18 +97,23 @@
 
     {
       label: '06-keyboard-e',
-      description: 'α=255 + paint (12,12), then keyboard E, then click (12,12) — pixel erased.',
+      description: 'From Pencil with α=255, keyboard "e" switches to the Eraser tool (without mutating α). Clicking (12,12) erases the pixel. Tool is restored to Pencil at the end so downstream chained tests stay on Pencil.',
       chain: true,
       run: async (app) => {
         app.setAlpha(255);
-        app.click(12, 12);
-        app.keyboard('e');
-        app.click(12, 12);
+        app.q('[data-tool="pencil"]').click();   // back to Pencil so 'e' has somewhere to switch FROM
+        app.click(12, 12);                        // paint ORANGE
+        app.keyboard('e');                        // 'e' → Eraser tool
+        const toolAfterE = app.q('.tool-btn.active').dataset.tool;
+        app.click(12, 12);                        // erase
+        app.q('[data-tool="pencil"]').click();   // restore for the rest of the chain
+        return { toolAfterE };
       },
-      assertions: (app) => [
-        ['α slider after E',        app.q('#alpha-slider').value,                  '0'],
-        ['active tool',             app.q('#tools .tool-btn.active').dataset.tool, 'pencil'],
-        ['pixel (12,12) erased',    app.pix(12, 12),                               TRANSPARENT],
+      assertions: (app, ctx) => [
+        ['α slider unchanged by e',          app.q('#alpha-slider').value,                  '255'],
+        ['e switched tool to eraser',        ctx.toolAfterE,                                'eraser'],
+        ['tool restored to pencil for chain', app.q('.tool-btn.active').dataset.tool,       'pencil'],
+        ['pixel (12,12) erased',             app.pix(12, 12),                               TRANSPARENT],
       ],
     },
 
@@ -133,21 +138,6 @@
         ['α slider',                 app.q('#alpha-slider').value,    '128'],
         ['color picker (RGB only)',  app.q('#current-color').value,   '#cb6e4a'],
       ],
-    },
-
-    {
-      label: '09-palette-add',
-      description: 'Click + — new swatch hex ends in 80 (=128); palette grows to 17.',
-      chain: true,
-      run: async (app) => { app.q('#palette .add-swatch').click(); },
-      assertions: (app) => {
-        const swatches = app.qa('#palette .swatch:not(.add-swatch)');
-        const last = swatches[swatches.length - 1];
-        return [
-          ['palette size',         swatches.length,  17],
-          ['last swatch title',    last.title,       '#cb6e4a80  (right-click to remove)'],
-        ];
-      },
     },
 
     {
@@ -602,12 +592,11 @@
 
     {
       label: '33-eraser-thick',
-      description: 'Pencil at α=0 (Erase) with thickness=3 clears a 3×3 region from a filled canvas.',
+      description: 'Eraser tool at thickness=3 clears a 3×3 region from a filled canvas (per prompt-4 item 17/23, the Eraser is now its own tool that paints α=0 regardless of currentColor).',
       run: async (app) => {
         app.q('[data-tool="fill"]').click();
         app.click(10, 10);                  // fill the whole canvas
-        app.q('[data-tool="pencil"]').click();
-        app.pressErase();                   // α=0, tool=pencil
+        app.pressErase();                   // selects Eraser tool
         app.setThickness(3);
         app.click(15, 15);
       },
@@ -670,29 +659,50 @@
       assertions: (app) => [
         ['Pencil',  app.q('[data-tool="pencil"]').innerHTML, '<b>P</b>encil'],
         ['Fill',    app.q('[data-tool="fill"]').innerHTML,   '<b>F</b>ill'],
-        ['Pick',    app.q('[data-tool="picker"]').innerHTML, 'P<b>i</b>ck'],
+        ['Pick',    app.q('[data-tool="picker"]').innerHTML, 'Pic<b>k</b>'],
         ['Rect',    app.q('[data-tool="rect"]').innerHTML,   '<b>R</b>ect'],
         ['Line',    app.q('[data-tool="line"]').innerHTML,   '<b>L</b>ine'],
-        ['Erase',   app.q('#btn-eraser').innerHTML,           '<b>E</b>rase'],
-        ['Undo',    app.q('#btn-undo').innerHTML,             '<b>U</b>ndo'],
-        ['Grid label has bold G',
+        ['Eraser',  app.q('#btn-eraser').innerHTML,           '<b>E</b>raser'],
+        ['Undo',    app.q('#btn-undo').innerHTML,             '<b>z</b> Undo'],
+        ['Redo',    app.q('#btn-redo').innerHTML,             '<b>x</b> Redo'],
+        ['Save (v shortcut)', app.q('#btn-save').innerHTML,   'Sa<b>v</b>e'],
+        ['Grid label has bold G with no space',
          app.q('#grid-toggle').closest('label').innerHTML.includes('<b>G</b>rid'), true],
+        ['Grid label has NO stray "G rid"',
+         /<b>G<\/b>\s+rid/.test(app.q('#grid-toggle').closest('label').innerHTML),  false],
+        ['alpha-preview label has bold a',
+         app.q('#alpha-preview').closest('label').innerHTML.includes('<b>a</b>lpha preview'), true],
+        ['distinct-preview label has bold t (t shortcut)',
+         app.q('#distinct-preview').closest('label').innerHTML.includes('distinc<b>t</b> colors'), true],
+        ['Color Quantization title has bold Q',
+         app.q('#btn-quant-toggle').innerHTML.includes('<b>Q</b>uantization'), true],
+        ['Crop to Selection has bold C',
+         app.q('#btn-crop-selection').innerHTML.includes('<b>C</b>rop to Selection'), true],
       ],
     },
 
     {
-      label: '39-keyboard-u-undo',
-      description: 'Plain U key triggers undo (without Cmd/Ctrl). R stays bound to Rect; Redo keeps Cmd-Shift-Z.',
+      label: '39-keyboard-z-x-undo-redo',
+      description: 'Plain Z triggers undo, X triggers redo (per prompt-4 item 8). Cmd/Ctrl+Z still works (verified elsewhere). The previous "u" binding has been removed.',
       run: async (app) => {
         app.click(10, 10);
-        const before = app.pix(10, 10);
+        const painted = app.pix(10, 10);
+        app.keyboard('z');
+        const afterUndo = app.pix(10, 10);
+        app.keyboard('x');
+        const afterRedo = app.pix(10, 10);
+        // Confirm "u" no longer maps to undo: paint, press u, pixel stays.
+        app.click(20, 20);
+        const beforeU = app.pix(20, 20);
         app.keyboard('u');
-        const after = app.pix(10, 10);
-        return { before, after };
+        const afterU = app.pix(20, 20);
+        return { painted, afterUndo, afterRedo, beforeU, afterU };
       },
       assertions: (_app, ctx) => [
-        ['before undo (painted)', ctx.before, ORANGE],
-        ['after undo (cleared)',  ctx.after,  TRANSPARENT],
+        ['after paint',           ctx.painted,    ORANGE],
+        ['after z (undo)',        ctx.afterUndo,  TRANSPARENT],
+        ['after x (redo)',        ctx.afterRedo,  ORANGE],
+        ['"u" key no longer undoes', ctx.afterU,  ctx.beforeU],
       ],
     },
 
@@ -809,17 +819,20 @@
 
     {
       label: '48-selection-drag-outline',
-      description: 'Drag with Select draws a blue outline on #selection-overlay; interior stays clear; #art is untouched.',
+      description: 'Drag with Select draws a merged blue outline AROUND the selected pixels (per prompt-4 item 4): edge lines sit on pixel boundaries, interior pixels (their centres in display coords) stay clear, and #art is untouched.',
       run: async (app) => {
         app.q('[data-tool="select"]').click();
         app.drag(4, 4, 8, 8);
       },
       assertions: (app) => [
-        ['outline NW (4,4)',         app.selectionPix(4, 4)[3] > 0,   true],
-        ['outline NE (8,4)',         app.selectionPix(8, 4)[3] > 0,   true],
-        ['outline SW (4,8)',         app.selectionPix(4, 8)[3] > 0,   true],
-        ['outline SE (8,8)',         app.selectionPix(8, 8)[3] > 0,   true],
-        ['outline mid-edge (6,4)',   app.selectionPix(6, 4)[3] > 0,   true],
+        // The runner.selectionPix(x, y) reads the top-left CORNER of image
+        // pixel (x, y) in display coords, which is exactly where merged-
+        // outline edges intersect.
+        ['outline NW corner (4,4)',  app.selectionPix(4, 4)[3] > 0,   true],
+        ['outline top-edge (6,4)',   app.selectionPix(6, 4)[3] > 0,   true],
+        ['outline top-edge (8,4)',   app.selectionPix(8, 4)[3] > 0,   true],
+        ['outline left-edge (4,8)',  app.selectionPix(4, 8)[3] > 0,   true],
+        ['outline SE corner (9,9)',  app.selectionPix(9, 9)[3] > 0,   true],
         ['interior (6,6) clear',     app.selectionPix(6, 6)[3],       0],
         ['#art (5,5) unchanged',     app.pix(5, 5),                   TRANSPARENT],
       ],
@@ -834,8 +847,8 @@
         app.keyboard('Escape');
       },
       assertions: (app) => [
-        ['outline (4,4) gone', app.selectionPix(4, 4)[3], 0],
-        ['outline (8,8) gone', app.selectionPix(8, 8)[3], 0],
+        ['outline NW (4,4) gone',  app.selectionPix(4, 4)[3], 0],
+        ['outline SE (9,9) gone',  app.selectionPix(9, 9)[3], 0],
       ],
     },
 
@@ -869,9 +882,9 @@
         app.q('[data-tool="pencil"]').click();
       },
       assertions: (app) => [
-        ['outline still on (4,4)', app.selectionPix(4, 4)[3] > 0,           true],
-        ['outline still on (8,8)', app.selectionPix(8, 8)[3] > 0,           true],
-        ['active tool',            app.q('.tool-btn.active').dataset.tool,  'pencil'],
+        ['outline NW still on (4,4)', app.selectionPix(4, 4)[3] > 0,           true],
+        ['outline SE still on (9,9)', app.selectionPix(9, 9)[3] > 0,           true],
+        ['active tool',               app.q('.tool-btn.active').dataset.tool,  'pencil'],
       ],
     },
 
@@ -894,7 +907,7 @@
       description: '9 ORANGE + 2 BLACK; expand panel, pick k=1 (snap mode) → every non-transparent pixel becomes ORANGE (the weighted-largest cluster snaps to ORANGE).',
       run: async (app) => {
         for (let i = 0; i < 9; i++) app.click(i, 0);
-        app.pickSwatch(0);                       // BLACK
+        app.setColorHex('#000000');                       // BLACK
         app.click(10, 0);
         app.click(11, 0);
         app.expandQuant();
@@ -913,7 +926,7 @@
       description: '5 ORANGE + 3 BLACK + 1 dark-gray; expand, k=2 (snap) keeps ORANGE & BLACK; dark-gray clusters with BLACK in LAB space and snaps there.',
       run: async (app) => {
         for (let i = 0; i < 5; i++) app.click(i, 0);
-        app.pickSwatch(0);                       // BLACK
+        app.setColorHex('#000000');                       // BLACK
         app.click(5, 0); app.click(6, 0); app.click(7, 0);
         const inp = app.q('#current-color');
         inp.value = '#202020';
@@ -946,27 +959,11 @@
     },
 
     {
-      label: '56-quantize-replaces-palette',
-      description: 'After Quantize, the global palette contains only the surviving quantized colors.',
-      run: async (app) => {
-        for (let i = 0; i < 5; i++) app.click(i, 0);
-        app.pickSwatch(0);
-        app.click(5, 0);
-        app.expandQuant();
-        app.pickKmeansK(2);
-        app.pressQuantize();
-      },
-      assertions: (app) => [
-        ['palette has 2 swatches', app.qa('#palette .swatch:not(.add-swatch)').length, 2],
-      ],
-    },
-
-    {
       label: '57-quantize-undoable',
       description: 'Undo after Quantize restores the original (non-quantized) pixels.',
       run: async (app) => {
         for (let i = 0; i < 5; i++) app.click(i, 0);
-        app.pickSwatch(0);
+        app.setColorHex('#000000');
         app.click(5, 0);
         app.expandQuant();
         app.pickKmeansK(1);
@@ -1014,7 +1011,7 @@
       run: async (app) => {
         app.q('[data-tool="select"]').click();
         app.drag(5, 5, 7, 7);
-        app.pickSwatch(0);                       // BLACK
+        app.setColorHex('#000000');                       // BLACK
         app.q('#btn-fill-selection').click();
       },
       assertions: (app) => [
@@ -1032,7 +1029,7 @@
       run: async (app) => {
         app.q('[data-tool="select"]').click();
         app.drag(5, 5, 7, 7);
-        app.pickSwatch(0);
+        app.setColorHex('#000000');
         app.keyboard('Enter');
       },
       assertions: (app) => [
@@ -1046,7 +1043,7 @@
       run: async (app) => {
         app.q('[data-tool="select"]').click();
         app.drag(5, 5, 7, 7);
-        app.pickSwatch(0);
+        app.setColorHex('#000000');
         app.q('#btn-fill-selection').click();
         const after = app.pix(6, 6);
         app.pressUndo();
@@ -1087,8 +1084,11 @@
         ['Apply button present',           !!app.q('#btn-resize-apply'),                                    true],
         ['shift X input present',          !!app.q('#resize-shift-x'),                                      true],
         ['shift Y input present',          !!app.q('#resize-shift-y'),                                      true],
-        ['proposed W initial value',       app.q('#resize-w').value,                                        '32'],
-        ['proposed H initial value',       app.q('#resize-h').value,                                        '32'],
+        // Per prompt-4 item 2: default to floor(imgW/5) so the proposed-
+        // grid overlay doesn't have to draw thousands of lines on first
+        // expand. For a 32×32 canvas that's 6.
+        ['proposed W default ≈ W/5',       app.q('#resize-w').value,                                        '6'],
+        ['proposed H default ≈ H/5',       app.q('#resize-h').value,                                        '6'],
       ],
     },
 
@@ -1556,5 +1556,568 @@
         ['snap proposal IS ORANGE (a real image color)', ctx.snapTitle,                       'rgba(203, 110, 74, 255)'],
       ],
     },
+
+    // ===== prompt-4 features =====
+
+    {
+      label: '84-eraser-tool-exists',
+      description: 'Eraser is a real tool (prompt-4 items 15/17/23), not a button-that-mutates-α. It lives in the #tools group next to Pencil with data-tool="eraser".',
+      run: async () => {},
+      assertions: (app) => {
+        const toolBtns = app.qa('#tools .tool-btn').map(b => b.dataset.tool);
+        return [
+          ['eraser button in #tools',         toolBtns.includes('eraser'),       true],
+          ['button label is "Eraser"',        app.q('#btn-eraser').textContent,  'Eraser'],
+          ['Eraser sits right after Pencil',
+           toolBtns.indexOf('eraser'),         toolBtns.indexOf('pencil') + 1],
+        ];
+      },
+    },
+
+    {
+      label: '85-tool-order-in-tools-group',
+      description: 'Drawing tools in the #tools group are ordered Pencil, Eraser, Line, Rect, Fill — increasing by "pixel power" (prompt-4 item 17).',
+      run: async () => {},
+      assertions: (app) => {
+        const order = app.qa('#tools .tool-btn').map(b => b.dataset.tool);
+        return [
+          ['order',  order,  ['pencil', 'eraser', 'line', 'rect', 'fill']],
+        ];
+      },
+    },
+
+    {
+      label: '86-eraser-paints-transparent-independent-of-alpha',
+      description: 'The Eraser tool always writes RGBA(0,0,0,0). The user\'s currentColor / α slider is preserved so switching back to Pencil resumes with their original color.',
+      run: async (app) => {
+        app.q('[data-tool="fill"]').click(); app.click(0, 0);    // fill ORANGE α=255
+        app.setAlpha(200);
+        const cpVal = app.q('#current-color').value;
+        app.q('[data-tool="eraser"]').click();
+        app.click(10, 10);                                         // erase one pixel
+        return { cpVal, slider: app.q('#alpha-slider').value, pix: app.pix(10, 10) };
+      },
+      assertions: (_app, ctx) => [
+        ['erased pixel is RGBA(0,0,0,0)',  ctx.pix,        TRANSPARENT],
+        ['α slider preserved',              ctx.slider,    '200'],
+        ['color picker preserved',          ctx.cpVal,     '#cb6e4a'],
+      ],
+    },
+
+    {
+      label: '87-fill-selection-disabled-without-selection',
+      description: 'Per prompt-4 item 6, the Fill Selection button is disabled until a selection exists, and enables once one does.',
+      run: async (app) => {
+        const beforeDisabled = app.q('#btn-fill-selection').disabled;
+        app.q('[data-tool="select"]').click();
+        app.drag(4, 4, 8, 8);
+        const afterDisabled = app.q('#btn-fill-selection').disabled;
+        app.keyboard('Escape');                                    // clear selection
+        const afterClearDisabled = app.q('#btn-fill-selection').disabled;
+        return { beforeDisabled, afterDisabled, afterClearDisabled };
+      },
+      assertions: (_app, ctx) => [
+        ['disabled before any selection',  ctx.beforeDisabled,      true],
+        ['enabled with a selection',       ctx.afterDisabled,       false],
+        ['disabled again after Escape',    ctx.afterClearDisabled,  true],
+      ],
+    },
+
+    {
+      label: '88-fill-selection-button-label',
+      description: '"Fill Sel" was renamed to "Fill Selection" (prompt-4 item 6).',
+      run: async () => {},
+      assertions: (app) => [
+        ['label text', app.q('#btn-fill-selection').textContent, 'Fill Selection'],
+      ],
+    },
+
+    {
+      label: '89-crop-to-selection-button-exists-and-disabled',
+      description: 'Per prompt-4 item 12, a "Crop to Selection" button exists and is disabled until a selection is active.',
+      run: async () => {},
+      assertions: (app) => [
+        ['button exists',                  !!app.q('#btn-crop-selection'),         true],
+        ['disabled by default',            app.q('#btn-crop-selection').disabled,  true],
+        ['label',                          app.q('#btn-crop-selection').textContent, 'Crop to Selection'],
+      ],
+    },
+
+    {
+      label: '90-crop-to-selection-crops-and-clears-selection',
+      description: 'With a rect selection 5..7 active, Crop to Selection trims the canvas to that 3×3 box and dismisses the selection.',
+      run: async (app) => {
+        app.q('[data-tool="fill"]').click(); app.click(0, 0);     // fill ORANGE
+        app.q('[data-tool="select"]').click();
+        app.drag(5, 5, 7, 7);
+        const enabled = !app.q('#btn-crop-selection').disabled;
+        app.q('#btn-crop-selection').click();
+        return {
+          enabled,
+          w: app.canvas.width,
+          h: app.canvas.height,
+          corner: app.pix(0, 0),
+          selectionGone: app.q('#btn-crop-selection').disabled,
+        };
+      },
+      assertions: (_app, ctx) => [
+        ['enabled with selection',           ctx.enabled,         true],
+        ['canvas w after crop',              ctx.w,               3],
+        ['canvas h after crop',              ctx.h,               3],
+        ['cropped corner kept its colour',   ctx.corner,          ORANGE],
+        ['selection dismissed after crop',   ctx.selectionGone,   true],
+      ],
+    },
+
+    {
+      label: '91-auto-crop-label-and-y-shortcut',
+      description: 'Old "Crop" button is now "Auto-Crop" (prompt-4 item 11). Y is its keyboard shortcut.',
+      run: async (app) => {
+        // Paint a small region away from the origin so Auto-Crop has work to do.
+        for (let y = 4; y < 7; y++) for (let x = 4; x < 7; x++) app.click(x, y);
+        const before = [app.canvas.width, app.canvas.height];
+        app.keyboard('y');
+        const after = [app.canvas.width, app.canvas.height];
+        return { before, after };
+      },
+      assertions: (app, ctx) => [
+        ['button label includes Auto-Crop',
+         app.q('#btn-crop').textContent.includes('Auto-Crop'), true],
+        ['canvas was 32×32',                ctx.before,            [32, 32]],
+        ['after y, canvas trimmed to 3×3',  ctx.after,             [3, 3]],
+      ],
+    },
+
+    {
+      label: '92-zoom-number-input-only',
+      description: 'Per prompt-4 item 13, the zoom UI is a single number input — the old +/- buttons are gone. The number input controls and reflects the live zoom.',
+      run: async (app) => {
+        const initial = app.q('#zoom-input').value;
+        const zi = app.q('#zoom-input');
+        zi.value = '8';
+        zi.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        const afterSet = app.canvas.style.width;
+        return { initial, afterSet };
+      },
+      assertions: (app, ctx) => [
+        ['zoom-input present',           !!app.q('#zoom-input'),                            true],
+        ['old +/- buttons gone',
+         !app.q('#btn-zoom-in') && !app.q('#btn-zoom-out'),                                  true],
+        ['initial value reflects fitZoom',
+         /^\d+$/.test(ctx.initial),                                                          true],
+        ['canvas CSS width = zoom × imgW',
+         ctx.afterSet,                                                                       '256px'],
+      ],
+    },
+
+    {
+      label: '93-zoom-equals-and-minus-still-work',
+      description: 'Per prompt-4 item 13, "-" and "=" still adjust zoom (but the visible UI is just a number input).',
+      run: async (app) => {
+        const before = parseInt(app.q('#zoom-input').value, 10);
+        app.keyboard('=');
+        const afterEq = parseInt(app.q('#zoom-input').value, 10);
+        app.keyboard('-');
+        const afterMinus = parseInt(app.q('#zoom-input').value, 10);
+        return { before, afterEq, afterMinus };
+      },
+      assertions: (_app, ctx) => [
+        ['= increased zoom',     ctx.afterEq,     ctx.before + 1],
+        ['- restored zoom',      ctx.afterMinus,  ctx.before],
+      ],
+    },
+
+    {
+      label: '94-thickness-comma-period-shortcuts',
+      description: 'Per prompt-4 item 16, "," and "." decrease / increase the brush thickness.',
+      run: async (app) => {
+        app.setThickness(5);
+        app.keyboard(',');
+        app.keyboard(',');
+        const lower = app.q('#shape-thickness').value;
+        app.keyboard('.');
+        app.keyboard('.');
+        app.keyboard('.');
+        const higher = app.q('#shape-thickness').value;
+        return { lower, higher };
+      },
+      assertions: (_app, ctx) => [
+        ['two "," presses → thickness 3',  ctx.lower,   '3'],
+        ['three "." presses → thickness 6', ctx.higher, '6'],
+      ],
+    },
+
+    {
+      label: '95-k-shortcut-picks-picker',
+      description: 'Per prompt-4 item 20, "k" selects the Pick (eyedropper) tool. The old "i" binding now toggles the Image Resize panel.',
+      run: async (app) => {
+        app.keyboard('k');
+        const afterK = app.q('.tool-btn.active').dataset.tool;
+        return { afterK };
+      },
+      assertions: (_app, ctx) => [
+        ['k → picker tool',  ctx.afterK,  'picker'],
+      ],
+    },
+
+    {
+      label: '96-draw-panel-d-shortcut',
+      description: 'Per prompt-4 item 18, "d" toggles the Draw panel open/closed.',
+      run: async (app) => {
+        const startsOpen = !app.q('#draw-body').classList.contains('hidden');
+        app.keyboard('d');
+        const afterFirst = !app.q('#draw-body').classList.contains('hidden');
+        app.keyboard('d');
+        const afterSecond = !app.q('#draw-body').classList.contains('hidden');
+        return { startsOpen, afterFirst, afterSecond };
+      },
+      assertions: (app, ctx) => [
+        ['draw panel exists',                !!app.q('#draw-panel'),                    true],
+        ['tool buttons live inside it',
+         !!app.q('#draw-panel #tools'),                                                  true],
+        ['color section lives inside it',
+         !!app.q('#draw-panel #color-section'),                                          true],
+        ['d toggled off',                    ctx.afterFirst,                            !ctx.startsOpen],
+        ['d toggled back on',                ctx.afterSecond,                           ctx.startsOpen],
+      ],
+    },
+
+    {
+      label: '97-q-shortcut-toggles-quant-panel',
+      description: 'Per prompt-5 item 3, the Color Quantization panel shortcut moved from "c" to "q".',
+      run: async (app) => {
+        const closed = app.q('#quant-body').classList.contains('hidden');
+        app.keyboard('q');
+        const afterOne = app.q('#quant-body').classList.contains('hidden');
+        app.keyboard('q');
+        const afterTwo = app.q('#quant-body').classList.contains('hidden');
+        // "c" must no longer toggle the quant panel.
+        app.keyboard('c');
+        const afterC = app.q('#quant-body').classList.contains('hidden');
+        return { closed, afterOne, afterTwo, afterC };
+      },
+      assertions: (_app, ctx) => [
+        ['starts collapsed',          ctx.closed,   true],
+        ['q opens',                   ctx.afterOne, false],
+        ['q collapses again',         ctx.afterTwo, true],
+        ['c no longer opens quant',   ctx.afterC,   true],
+      ],
+    },
+
+    {
+      label: '98-i-shortcut-toggles-resize-panel',
+      description: 'Per prompt-4 item 20, "i" toggles the Image Resize panel (and no longer selects the picker — that\'s "k" now).',
+      run: async (app) => {
+        const closed = app.q('#resize-body').classList.contains('hidden');
+        app.keyboard('i');
+        const afterOne = app.q('#resize-body').classList.contains('hidden');
+        const stillPencil = app.q('.tool-btn.active').dataset.tool;
+        app.keyboard('i');
+        const afterTwo = app.q('#resize-body').classList.contains('hidden');
+        return { closed, afterOne, afterTwo, stillPencil };
+      },
+      assertions: (_app, ctx) => [
+        ['starts collapsed',                ctx.closed,         true],
+        ['i opens',                          ctx.afterOne,      false],
+        ['i did NOT select picker',         ctx.stillPencil,    'pencil'],
+        ['i collapses again',                ctx.afterTwo,      true],
+      ],
+    },
+
+    {
+      label: '99-undo-redo-refits-zoom',
+      description: 'Per prompt-4 item 10, undo / redo reset the view / zoom level. Cranking zoom far off the fit value and then undoing must snap the zoom back to a fitted value (i.e. undo re-fits the view).',
+      run: async (app) => {
+        // Force the zoom to the maximum, well away from any fit value.
+        const zi = app.q('#zoom-input');
+        zi.value = '64';
+        zi.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        const beforeUndo = parseInt(zi.value, 10);
+        // An undoable edit, then undo — undo() calls fitZoom().
+        app.click(5, 5);
+        app.pressUndo();
+        const afterUndo = parseInt(app.q('#zoom-input').value, 10);
+        // Redo also re-fits.
+        app.pressRedo();
+        const afterRedo = parseInt(app.q('#zoom-input').value, 10);
+        return { beforeUndo, afterUndo, afterRedo };
+      },
+      assertions: (_app, ctx) => [
+        ['zoom was cranked to 64',         ctx.beforeUndo,                 64],
+        ['undo re-fit the zoom (≠ 64)',    ctx.afterUndo !== 64,           true],
+        ['redo also re-fit the zoom (≠ 64)', ctx.afterRedo !== 64,         true],
+      ],
+    },
+
+    {
+      label: '100-pulse-on-shortcut',
+      description: 'Per prompt-4 item 21, typing a keyboard shortcut adds a brief .pulse class to the activated UI element (even on repeat key).',
+      run: async (app) => {
+        // After 'r', the Rect tool button should pulse momentarily.
+        app.keyboard('r');
+        const hasPulseImmediately = app.q('[data-tool="rect"]').classList.contains('pulse');
+        // Even repeat keypresses pulse — verify by re-pressing.
+        app.q('[data-tool="rect"]').classList.remove('pulse');
+        app.keyboard('r');
+        const hasPulseOnRepeat = app.q('[data-tool="rect"]').classList.contains('pulse');
+        return { hasPulseImmediately, hasPulseOnRepeat };
+      },
+      assertions: (_app, ctx) => [
+        ['pulse class applied on first r',   ctx.hasPulseImmediately,   true],
+        ['pulse class re-applied on repeat', ctx.hasPulseOnRepeat,      true],
+      ],
+    },
+
+    // ===== prompt-5 features =====
+
+    {
+      label: '101-format-selector-right-of-save',
+      description: 'Per prompt-5 item 2, the save-format <select> sits to the RIGHT of the Save button in the DOM.',
+      run: async () => {},
+      assertions: (app) => {
+        const group = app.q('#btn-save').parentElement;
+        const kids = Array.from(group.children);
+        return [
+          ['save-format after Save button',
+           kids.indexOf(app.q('#save-format')) > kids.indexOf(app.q('#btn-save')), true],
+        ];
+      },
+    },
+
+    {
+      label: '102-thickness-and-filled-in-draw-panel',
+      description: 'Per prompt-5 item 5, the Thickness input and Filled checkbox live inside the Draw panel.',
+      run: async () => {},
+      assertions: (app) => [
+        ['#shape-thickness inside #draw-panel', !!app.q('#draw-panel #shape-thickness'), true],
+        ['#rect-filled inside #draw-panel',     !!app.q('#draw-panel #rect-filled'),     true],
+        ['#shape-options no longer in toolbar', !!app.q('#toolbar #shape-options'),      false],
+      ],
+    },
+
+    {
+      label: '103-crop-and-fill-selection-right-of-mode',
+      description: 'Per prompt-5 item 8, "Crop to Selection" and "Fill Selection" sit to the right of the selection Mode dropdown, inside #select-tool-group.',
+      run: async () => {},
+      assertions: (app) => {
+        const group = app.q('#select-tool-group');
+        const kids = Array.from(group.children);
+        const modeLabel = app.q('#selection-mode').closest('label');
+        return [
+          ['Crop to Selection in #select-tool-group', !!app.q('#select-tool-group #btn-crop-selection'), true],
+          ['Fill Selection in #select-tool-group',    !!app.q('#select-tool-group #btn-fill-selection'), true],
+          ['Crop to Selection after Mode dropdown',
+           kids.indexOf(app.q('#btn-crop-selection')) > kids.indexOf(modeLabel), true],
+          ['Fill Selection after Mode dropdown',
+           kids.indexOf(app.q('#btn-fill-selection')) > kids.indexOf(modeLabel), true],
+        ];
+      },
+    },
+
+    {
+      label: '104-palette-removed',
+      description: 'Per prompt-5 item 9, the palette swatch grid and "add current color" button are gone.',
+      run: async () => {},
+      assertions: (app) => [
+        ['#palette element gone',  !!app.q('#palette'),               false],
+        ['no .add-swatch button',  !!app.q('.add-swatch'),            false],
+        ['Pick button still present', !!app.q('[data-tool="picker"]'), true],
+      ],
+    },
+
+    {
+      label: '105-c-shortcut-crops-to-selection',
+      description: 'Per prompt-5 item 4, "c" triggers Crop to Selection (a no-op while no selection exists).',
+      run: async (app) => {
+        app.q('[data-tool="fill"]').click(); app.click(0, 0);     // fill ORANGE
+        // No selection yet — c should be a safe no-op.
+        app.keyboard('c');
+        const sizeNoSel = [app.canvas.width, app.canvas.height];
+        // Now make a selection and crop with c.
+        app.q('[data-tool="select"]').click();
+        app.drag(6, 6, 9, 9);
+        app.keyboard('c');
+        const sizeAfter = [app.canvas.width, app.canvas.height];
+        return { sizeNoSel, sizeAfter };
+      },
+      assertions: (_app, ctx) => [
+        ['c is a no-op without a selection', ctx.sizeNoSel,  [32, 32]],
+        ['c crops to the 4×4 selection box', ctx.sizeAfter,  [4, 4]],
+      ],
+    },
+
+    {
+      label: '106-v-shortcut-and-save-button',
+      description: 'Per prompt-5 item 1, "v" is the Save hotkey. The Save button keeps its id and label "Save".',
+      run: async (app) => {
+        // Stub out the download path so the test doesn't spawn a real file
+        // save; just confirm the keypress reaches saveImage without throwing.
+        let saved = 0;
+        const origCreate = app.win.HTMLAnchorElement.prototype.click;
+        app.win.HTMLAnchorElement.prototype.click = function () { saved++; };
+        let threw = false;
+        try {
+          app.q('[data-tool="pencil"]').click();
+          app.click(1, 1);                       // something to save
+          app.keyboard('v');
+        } catch (_) { threw = true; }
+        app.win.HTMLAnchorElement.prototype.click = origCreate;
+        return { threw, label: app.q('#btn-save').textContent };
+      },
+      assertions: (_app, ctx) => [
+        ['v keypress did not throw', ctx.threw,  false],
+        ['Save button label',       ctx.label,  'Save'],
+      ],
+    },
+
+    {
+      label: '107-t-shortcut-toggles-distinct-preview',
+      description: 'Per prompt-5 item 7, "t" toggles the distinct-colors preview.',
+      run: async (app) => {
+        app.click(3, 3);                          // one pixel so the preview has content
+        const before = app.q('#distinct-preview').checked;
+        app.keyboard('t');
+        const afterOne = app.q('#distinct-preview').checked;
+        app.keyboard('t');
+        const afterTwo = app.q('#distinct-preview').checked;
+        return { before, afterOne, afterTwo };
+      },
+      assertions: (_app, ctx) => [
+        ['starts off',           ctx.before,    false],
+        ['t turns it on',        ctx.afterOne,  true],
+        ['t turns it off again', ctx.afterTwo,  false],
+      ],
+    },
+
+    {
+      label: '108-auto-crop-trims-uniform-background',
+      description: 'Per prompt-5 item 6, Auto-Crop trims a uniform OPAQUE background border (not just transparent). Fill the canvas white, paint a black 3×3 block, Auto-Crop → canvas shrinks to the block.',
+      run: async (app) => {
+        // Fill the whole canvas opaque white.
+        app.setColorHex('#ffffff');
+        app.q('[data-tool="fill"]').click();
+        app.click(0, 0);
+        // Paint a black 3×3 block at (10..12, 10..12).
+        app.setColorHex('#000000');
+        app.q('[data-tool="pencil"]').click();
+        app.setThickness(1);
+        for (let y = 10; y < 13; y++) for (let x = 10; x < 13; x++) app.click(x, y);
+        const before = [app.canvas.width, app.canvas.height];
+        app.keyboard('y');                        // Auto-Crop
+        const after = [app.canvas.width, app.canvas.height];
+        return { before, after, corner: app.pix(0, 0) };
+      },
+      assertions: (_app, ctx) => [
+        ['canvas started 32×32',           ctx.before,  [32, 32]],
+        ['Auto-Crop trimmed white border', ctx.after,   [3, 3]],
+        ['cropped content is the black block', ctx.corner, [0, 0, 0, 255]],
+      ],
+    },
+
+    // ===== Image Resize: pixel-size mode =====
+
+    {
+      label: '109-resize-mode-selector-toggles-fields',
+      description: 'The Image Resize panel has a "Resize by" selector. Output-size mode shows the W/H inputs; Pixel-size mode hides them and reveals the Pixel W/H inputs. The header summary names the pixel size.',
+      run: async (app) => {
+        app.expandResize();
+        const outShownDefault = !app.q('#resize-output-fields').classList.contains('hidden');
+        const pxHiddenDefault =  app.q('#resize-pixel-fields').classList.contains('hidden');
+        const mode = app.q('#resize-mode');
+        mode.value = 'pixel';
+        mode.dispatchEvent(new app.win.Event('change', { bubbles: true }));
+        const outHiddenAfter =  app.q('#resize-output-fields').classList.contains('hidden');
+        const pxShownAfter   = !app.q('#resize-pixel-fields').classList.contains('hidden');
+        const summary = app.q('#resize-summary').textContent;
+        return { outShownDefault, pxHiddenDefault, outHiddenAfter, pxShownAfter, summary };
+      },
+      assertions: (_app, ctx) => [
+        ['output fields shown by default',  ctx.outShownDefault,  true],
+        ['pixel fields hidden by default',  ctx.pxHiddenDefault,  true],
+        ['output fields hidden in pixel mode', ctx.outHiddenAfter, true],
+        ['pixel fields shown in pixel mode',   ctx.pxShownAfter,   true],
+        // Default pixel size is 5 → 32×32 becomes ceil(32/5)=7 per axis.
+        ['summary names the pixel size',    ctx.summary,          '32×32 → 7×7 · pixel 5×5'],
+      ],
+    },
+
+    {
+      label: '110-resize-by-pixel-size-applies',
+      description: 'In Pixel-size mode the user sets the size of ONE resized pixel (in current pixels). Pixel size 4×4 on a 32×32 canvas → 8×8 output, where output(i,j) samples source(i*4, j*4) — the green grid cells are exactly 4×4.',
+      run: async (app) => {
+        app.click(4, 0);                          // ORANGE at source (4,0)
+        app.click(8, 8);                          // ORANGE at source (8,8)
+        app.expandResize();
+        const mode = app.q('#resize-mode');
+        mode.value = 'pixel';
+        mode.dispatchEvent(new app.win.Event('change', { bubbles: true }));
+        const pw = app.q('#resize-px-w');
+        pw.value = '4'; pw.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        const ph = app.q('#resize-px-h');
+        ph.value = '4'; ph.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        app.q('#btn-resize-apply').click();
+        return { w: app.canvas.width, h: app.canvas.height };
+      },
+      assertions: (app, ctx) => [
+        ['output is 8×8 = ceil(32/4) per axis',  [ctx.w, ctx.h],   [8, 8]],
+        ['source (4,0) lands at output (1,0)',   app.pix(1, 0),    ORANGE],
+        ['source (8,8) lands at output (2,2)',   app.pix(2, 2),    ORANGE],
+        ['output (0,0) is empty',                app.pix(0, 0),    TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '111-resize-by-pixel-size-non-divisible',
+      description: 'Pixel-size mode handles a cell size that does not divide the canvas evenly: pixel size 5 on a 32-wide canvas → ceil(32/5)=7 columns, and output column i samples source column i*5.',
+      run: async (app) => {
+        app.click(30, 0);                         // ORANGE at source col 30 (= 6*5)
+        app.expandResize();
+        const mode = app.q('#resize-mode');
+        mode.value = 'pixel';
+        mode.dispatchEvent(new app.win.Event('change', { bubbles: true }));
+        const pw = app.q('#resize-px-w');
+        pw.value = '5'; pw.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        const ph = app.q('#resize-px-h');
+        ph.value = '5'; ph.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        app.q('#btn-resize-apply').click();
+        return { w: app.canvas.width, h: app.canvas.height };
+      },
+      assertions: (app, ctx) => [
+        ['output width is ceil(32/5) = 7', ctx.w,            7],
+        ['source col 30 lands at output col 6', app.pix(6, 0), ORANGE],
+        ['output col 5 (source 25) is empty',   app.pix(5, 0), TRANSPARENT],
+      ],
+    },
+
+    {
+      label: '112-pixel-size-aspect-lock',
+      description: 'Pixel-size mode has its own "Lock aspect" checkbox, checked by default — it keeps the resized pixel square (editing one dimension mirrors the other). Unchecking it allows a non-square pixel like 3×5.',
+      run: async (app) => {
+        app.expandResize();
+        const mode = app.q('#resize-mode');
+        mode.value = 'pixel';
+        mode.dispatchEvent(new app.win.Event('change', { bubbles: true }));
+        const lockDefault = app.q('#resize-px-keep-aspect').checked;
+        // With the lock on, editing Pixel W mirrors Pixel H.
+        const pw = app.q('#resize-px-w');
+        pw.value = '8'; pw.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        const hMirrored = app.q('#resize-px-h').value;
+        // Unlock, then set a non-square 3×5.
+        const lock = app.q('#resize-px-keep-aspect');
+        lock.checked = false;
+        lock.dispatchEvent(new app.win.Event('change', { bubbles: true }));
+        pw.value = '3'; pw.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        const ph = app.q('#resize-px-h');
+        ph.value = '5'; ph.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        return { lockDefault, hMirrored, pw: pw.value, ph: ph.value };
+      },
+      assertions: (_app, ctx) => [
+        ['lock checked by default',         ctx.lockDefault, true],
+        ['locked: Pixel H mirrors Pixel W', ctx.hMirrored,   '8'],
+        ['unlocked: Pixel W stays 3',       ctx.pw,          '3'],
+        ['unlocked: Pixel H stays 5',       ctx.ph,          '5'],
+      ],
+    },
+
   ];
 })();

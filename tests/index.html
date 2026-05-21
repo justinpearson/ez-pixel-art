@@ -160,7 +160,15 @@
   <tbody></tbody>
 </table>
 
-<script src="scenarios.js"></script>
-<script src="runner.js"></script>
+<script>
+// Cache-bust the test scripts so reloads always pick up the latest
+// scenarios.js / runner.js (the browser would otherwise serve stale
+// copies from the HTTP cache).
+(() => {
+  const t = Date.now();
+  document.write('<script src="scenarios.js?_t=' + t + '"><\/script>');
+  document.write('<script src="runner.js?_t=' + t + '"><\/script>');
+})();
+</script>
 </body>
 </html>
