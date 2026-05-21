@@ -22,9 +22,16 @@ body { display: flex; flex-direction: column; }
 }
 .brand { font-weight: 600; font-size: 15px; margin-right: 4px; color: inherit; text-decoration: none; }
 .brand:hover { text-decoration: underline; }
-#toolbar .group { display: flex; align-items: center; gap: 4px; }
+#toolbar .group,
+#draw-body .group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 #toolbar button,
-#toolbar select {
+#toolbar select,
+#draw-body button,
+#draw-body select {
   padding: 4px 9px;
   font: inherit;
   background: #fff;
@@ -32,23 +39,43 @@ body { display: flex; flex-direction: column; }
   border-radius: 4px;
   cursor: pointer;
 }
-#toolbar button:hover { background: #eef; }
-#toolbar button:active { background: #dde; }
-#toolbar .tool-btn.active {
-  background: #d6e6ff;
-  border-color: #4a8dff;
+#toolbar button:hover,
+#draw-body button:hover { background: #eef; }
+#toolbar button:active,
+#draw-body button:active { background: #dde; }
+#toolbar button:disabled,
+#draw-body button:disabled {
+  background: #f3f3f3;
+  color: #aaa;
+  cursor: not-allowed;
+  border-color: #ddd;
 }
-#toolbar .check {
+.tool-btn.active {
+  background: #d6e6ff !important;
+  border-color: #4a8dff !important;
+}
+#toolbar .check,
+#draw-body .check {
   display: flex;
   gap: 4px;
   align-items: center;
   cursor: pointer;
 }
-#zoom-label {
-  min-width: 36px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
+
+/* Always-visible up/down arrows on number inputs. Default browser styles hide
+   them until hover; this surfaces them at all times so the user knows the
+   field is a spinner. */
+input[type="number"] {
+  -moz-appearance: number-input;
+  appearance: auto;
 }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  opacity: 1;
+  -webkit-appearance: inner-spin-button;
+}
+
+#zoom-input { width: 56px; padding: 2px 4px; font: inherit; }
 #current-color {
   width: 34px;
   height: 28px;
@@ -68,7 +95,7 @@ body { display: flex; flex-direction: column; }
 #alpha-number,
 #shape-thickness,
 #quantize-n {
-  width: 52px;
+  width: 56px;
   padding: 2px 4px;
   font: inherit;
 }
@@ -82,12 +109,8 @@ body { display: flex; flex-direction: column; }
   font-variant-numeric: tabular-nums;
   font-size: 12px;
 }
-#palette {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  max-width: 220px;
-}
+/* .swatch styles the current-colour preview chip (#current-color-preview);
+   the palette swatch grid was removed per prompt-5 item 9. */
 .swatch {
   width: 18px;
   height: 18px;
@@ -100,12 +123,6 @@ body { display: flex; flex-direction: column; }
     conic-gradient(#ccc 25%, #fff 0 50%, #ccc 0 75%, #fff 0) !important;
   background-size: auto, 6px 6px !important;
 }
-.add-swatch {
-  background: #f5f5f5 !important;
-  color: #888;
-  font-weight: 600;
-  line-height: 1;
-}
 #status {
   margin-left: auto;
   color: #666;
@@ -117,7 +134,21 @@ body { display: flex; flex-direction: column; }
   text-align: right;
 }
 
-/* ---------- Collapsible panels (shared by Color Quantization, Image Resize) ---------- */
+/* ---------- Keyboard-shortcut pulse ---------- */
+/* A short visual pulse on whatever UI element a keyboard shortcut just
+   activated. Re-applied even on a repeat press so the user gets feedback
+   regardless of state change. */
+@keyframes ezpa-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(74, 141, 255, 0.85); }
+  60%  { box-shadow: 0 0 0 6px rgba(74, 141, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(74, 141, 255, 0); }
+}
+.pulse {
+  animation: ezpa-pulse 0.45s ease-out;
+}
+
+/* ---------- Collapsible panels (shared by Color Quantization, Image Resize, Draw) ---------- */
+#draw-panel,
 #quant-panel,
 #resize-panel {
   flex-shrink: 0;
@@ -125,8 +156,9 @@ body { display: flex; flex-direction: column; }
   border-bottom: 1px solid #ddd;
   display: flex;
   flex-direction: column;
-  max-height: 60vh;
 }
+#quant-panel { max-height: 60vh; }
+#draw-header,
 #quant-header,
 #resize-header {
   display: flex;
@@ -136,8 +168,7 @@ body { display: flex; flex-direction: column; }
   background: #f3f3f3;
   border-bottom: 1px solid #e5e5e5;
 }
-.panel-toggle,
-.quant-toggle {
+.panel-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -149,19 +180,27 @@ body { display: flex; flex-direction: column; }
   cursor: pointer;
   color: inherit;
 }
-.panel-toggle:hover,
-.quant-toggle:hover { background: #ececec; border-radius: 4px; }
-.panel-toggle .caret,
-.quant-toggle .caret {
+.panel-toggle:hover { background: #ececec; border-radius: 4px; }
+.panel-toggle .caret {
   display: inline-block;
   font-size: 10px;
   color: #888;
   transition: transform 0.12s ease;
 }
-.panel-toggle[aria-expanded="true"] .caret,
-.quant-toggle[aria-expanded="true"] .caret { transform: rotate(90deg); }
+.panel-toggle[aria-expanded="true"] .caret { transform: rotate(90deg); }
+#draw-summary,
 #quant-summary,
 #resize-summary { color: #666; font-size: 12px; }
+
+/* ---------- Draw panel ---------- */
+#draw-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 8px 12px;
+}
+#draw-body.hidden { display: none; }
 
 /* ---------- Image Resize panel ---------- */
 #resize-body { padding: 8px 12px; }
@@ -188,12 +227,20 @@ body { display: flex; flex-direction: column; }
   cursor: pointer;
 }
 .resize-controls #btn-resize-apply:hover { background: #3a7dee; }
+
+/* ---------- Color Quantization panel ---------- */
 #quant-body {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: auto;
+  /* User-resizable height. The grip lives at the panel's bottom-right
+     corner. min-height keeps headers visible even when shrunk. */
+  resize: vertical;
+  height: 40vh;
+  min-height: 120px;
+  max-height: 80vh;
 }
 .quant-section {
   padding: 8px 12px;
@@ -363,6 +410,11 @@ main { flex: 1; min-height: 0; }
   top: 0;
   left: 0;
   pointer-events: none;
+}
+/* The hover overlay still renders pixel-block markers; selection and resize
+   overlays now draw in CSS pixels (lines along pixel edges), so they should
+   stay crisp without nearest-neighbour upscale. */
+#hover-overlay {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }

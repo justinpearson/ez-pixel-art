@@ -35,8 +35,20 @@
       return Array.from(c.getContext('2d').getImageData(x, y, 1, 1).data);
     }
     selectionPix(x, y) {
+      // The selection overlay now lives at the canvas's display resolution
+      // (one backing pixel per CSS pixel) so it can stroke crisp outlines
+      // along pixel boundaries. Scale incoming image-pixel coords through
+      // the canvas-to-image ratio so scenarios keep speaking in image
+      // coords. selectionPix(x, y) reads the TOP-LEFT corner of image
+      // pixel (x, y), which is exactly where outline edges intersect.
       const c = this.q('#selection-overlay');
-      return Array.from(c.getContext('2d').getImageData(x, y, 1, 1).data);
+      const sx = c.width / this.canvas.width;
+      const sy = c.height / this.canvas.height;
+      return Array.from(c.getContext('2d').getImageData(
+        Math.min(c.width - 1, Math.max(0, Math.floor(x * sx))),
+        Math.min(c.height - 1, Math.max(0, Math.floor(y * sy))),
+        1, 1,
+      ).data);
     }
 
     _coords(x, y) {
@@ -88,8 +100,13 @@
       f.checked = !!b;
       f.dispatchEvent(new this.win.Event('change', { bubbles: true }));
     }
-    pickSwatch(idx) {
-      this.qa('#palette .swatch:not(.add-swatch)')[idx].click();
+    // The palette swatch grid was removed (prompt-5 item 9); scenarios set
+    // the current colour directly through the colour picker instead. The
+    // <input type="color"> carries RGB only, so alpha is left untouched.
+    setColorHex(hex) {
+      const cp = this.q('#current-color');
+      cp.value = hex;
+      cp.dispatchEvent(new this.win.Event('input', { bubbles: true }));
     }
     pressErase()         { this.q('#btn-eraser').click(); }
     pressUndo()          { this.q('#btn-undo').click(); }

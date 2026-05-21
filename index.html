@@ -11,32 +11,20 @@
     <a class="brand" href="https://github.com/justinpearson/ez-pixel-art" target="_blank" rel="noopener" title="View source on GitHub">ez-pixel-art</a>
 
     <div class="group">
-      <button id="btn-new" title="New image">New</button>
-      <button id="btn-open" title="Open image">Open</button>
+      <button id="btn-new" title="New image (N)"><b>N</b>ew</button>
+      <button id="btn-open" title="Open image (O)"><b>O</b>pen</button>
       <input type="file" id="file-input" accept="image/png,image/jpeg,image/bmp,image/*" hidden />
+      <button id="btn-save" title="Save image (V, Cmd/Ctrl+S)">Sa<b>v</b>e</button>
       <select id="save-format" title="Save format">
         <option value="png">PNG</option>
         <option value="jpg">JPG</option>
         <option value="bmp">BMP</option>
       </select>
-      <button id="btn-save" title="Save image">Save</button>
     </div>
 
-    <div class="group" id="tools">
-      <button class="tool-btn active" data-tool="pencil" title="Pencil (P)"><b>P</b>encil</button>
-      <button class="tool-btn" data-tool="fill"   title="Fill (F)"><b>F</b>ill</button>
-      <button class="tool-btn" data-tool="rect"   title="Rectangle (R) — drag to draw; Esc to cancel"><b>R</b>ect</button>
-      <button class="tool-btn" data-tool="line"   title="Line (L) — drag to draw; Esc to cancel"><b>L</b>ine</button>
+    <div class="group" id="select-tool-group">
       <button class="tool-btn" data-tool="select" title="Select (S) — drag to select; Delete clears selected pixels; Esc dismisses"><b>S</b>elect</button>
-    </div>
-
-    <div class="group" id="shape-options">
-      <label>Thickness <input type="number" id="shape-thickness" min="1" max="16" value="1" /></label>
-      <label class="check"><input type="checkbox" id="rect-filled" /> Filled</label>
-    </div>
-
-    <div class="group" id="select-options">
-      <label>Selection
+      <label>Mode
         <select id="selection-mode" title="How the Select tool interprets clicks/drags">
           <option value="rect">Rectangle</option>
           <option value="row">Row</option>
@@ -45,57 +33,91 @@
           <option value="same-color">Same color</option>
         </select>
       </label>
+      <button id="btn-crop-selection" title="Crop the canvas to the bounding box of the current selection (C)" disabled><b>C</b>rop to Selection</button>
+      <button id="btn-fill-selection" title="Fill selected pixels with current color (Enter)" disabled>Fill Selection</button>
     </div>
 
     <div class="group">
-      <button id="btn-undo" title="Undo (U, Cmd/Ctrl+Z)"><b>U</b>ndo</button>
-      <button id="btn-redo" title="Redo (Cmd/Ctrl+Shift+Z)">Redo</button>
+      <button id="btn-undo" title="Undo (Z, Cmd/Ctrl+Z)"><b>z</b> Undo</button>
+      <button id="btn-redo" title="Redo (X, Cmd/Ctrl+Shift+Z)"><b>x</b> Redo</button>
     </div>
 
     <div class="group">
-      <button id="btn-crop"   title="Crop to opaque content">Crop</button>
-      <button id="btn-fill-selection" title="Fill selected pixels with current color (Enter)">Fill Sel</button>
+      <button id="btn-crop"   title="Auto-Crop away the uniform background border (Y)">Auto-Crop (<b>y</b>)</button>
     </div>
 
-    <div class="group">
-      <button id="btn-zoom-out" title="Zoom out (-)">−</button>
-      <span id="zoom-label">1×</span>
-      <button id="btn-zoom-in" title="Zoom in (+)">+</button>
-      <label class="check"><input type="checkbox" id="grid-toggle" /> <b>G</b>rid</label>
-      <label class="check"><input type="checkbox" id="alpha-preview" /> α preview</label>
-      <label class="check" title="Recolor each distinct RGBA in the image with a high-contrast hue so similar colors are easy to tell apart. View-only — does not edit the image."><input type="checkbox" id="distinct-preview" /> distinct colors</label>
-    </div>
-
-    <div class="group" id="color-section">
-      <input type="color" id="current-color" value="#cb6e4a" title="Current color (RGB)" />
-      <span class="alpha-control" title="Alpha (0 = transparent, 255 = opaque)">
-        <span class="alpha-label">α</span>
-        <input type="range" id="alpha-slider" min="0" max="255" value="255" />
-        <input type="number" id="alpha-number" min="0" max="255" value="255" />
-      </span>
-      <div id="current-color-preview" class="swatch" title="Effective RGBA"></div>
-      <span id="current-color-info" title="Current RGBA values">rgba(203, 110, 74, 255)</span>
-      <button id="btn-eraser" title="Set alpha to 0 (E)"><b>E</b>rase</button>
-      <button class="tool-btn" data-tool="picker" title="Eyedropper (I) — right-click on the canvas also picks">P<b>i</b>ck</button>
-      <div id="palette" title="Click swatch to use · right-click to remove"></div>
+    <div class="group" id="zoom-group">
+      <label>Zoom <input type="number" id="zoom-input" min="1" max="64" step="1" value="16" title="Zoom level (− / =)" /></label>
+      <label class="check"><input type="checkbox" id="grid-toggle" /><span><b>G</b>rid</span></label>
+      <label class="check"><input type="checkbox" id="alpha-preview" /><span><b>a</b>lpha preview</span></label>
+      <label class="check" title="Recolor each distinct RGBA in the image with a high-contrast hue so similar colors are easy to tell apart. View-only — does not edit the image. (T)"><input type="checkbox" id="distinct-preview" /><span>distinc<b>t</b> colors</span></label>
     </div>
 
     <span id="status"></span>
   </header>
 
+  <section id="draw-panel">
+    <header id="draw-header">
+      <button id="btn-draw-toggle" type="button" class="panel-toggle" aria-expanded="true" title="Show / hide the Draw panel (D)">
+        <span class="caret">▶</span>
+        <span class="panel-title">Draw</span>
+      </button>
+      <span id="draw-summary"></span>
+    </header>
+    <div id="draw-body">
+      <div class="group" id="tools">
+        <button class="tool-btn active" data-tool="pencil" title="Pencil (P)"><b>P</b>encil</button>
+        <button id="btn-eraser" class="tool-btn" data-tool="eraser" title="Eraser (E) — paints transparent pixels"><b>E</b>raser</button>
+        <button class="tool-btn" data-tool="line"   title="Line (L) — drag to draw; Esc to cancel"><b>L</b>ine</button>
+        <button class="tool-btn" data-tool="rect"   title="Rectangle (R) — drag to draw; Esc to cancel"><b>R</b>ect</button>
+        <button class="tool-btn" data-tool="fill"   title="Fill (F)"><b>F</b>ill</button>
+      </div>
+
+      <div class="group" id="shape-options">
+        <label>Thickness <input type="number" id="shape-thickness" min="1" max="16" value="1" title="Brush / outline thickness (, and . adjust it)" /></label>
+        <label class="check"><input type="checkbox" id="rect-filled" /><span>Filled</span></label>
+      </div>
+
+      <div class="group" id="color-section">
+        <input type="color" id="current-color" value="#cb6e4a" title="Current color (RGB)" />
+        <span class="alpha-control" title="Alpha (0 = transparent, 255 = opaque)">
+          <span class="alpha-label">α</span>
+          <input type="range" id="alpha-slider" min="0" max="255" value="255" />
+          <input type="number" id="alpha-number" min="0" max="255" value="255" />
+        </span>
+        <div id="current-color-preview" class="swatch" title="Effective RGBA"></div>
+        <span id="current-color-info" title="Current RGBA values">rgba(203, 110, 74, 255)</span>
+        <button class="tool-btn" data-tool="picker" title="Eyedropper (K) — right-click on the canvas also picks">Pic<b>k</b></button>
+      </div>
+    </div>
+  </section>
+
   <section id="resize-panel">
     <header id="resize-header">
-      <button id="btn-resize-toggle" type="button" class="panel-toggle" aria-expanded="false" title="Show / hide the Image Resize panel">
+      <button id="btn-resize-toggle" type="button" class="panel-toggle" aria-expanded="false" title="Show / hide the Image Resize panel (I)">
         <span class="caret">▶</span>
-        <span class="panel-title">Image Resize</span>
+        <span class="panel-title"><b>I</b>mage Resize</span>
       </button>
       <span id="resize-summary"></span>
     </header>
     <div id="resize-body" class="hidden">
       <div class="resize-controls">
-        <label>W <input type="number" id="resize-w" min="1" max="2048" value="32" /></label>
-        <label>H <input type="number" id="resize-h" min="1" max="2048" value="32" /></label>
-        <label class="check"><input type="checkbox" id="resize-keep-aspect" checked /> Lock aspect</label>
+        <label>Resize by
+          <select id="resize-mode" title="Choose what the W/H inputs mean">
+            <option value="output">Output size</option>
+            <option value="pixel">Pixel size</option>
+          </select>
+        </label>
+        <span id="resize-output-fields">
+          <label>W <input type="number" id="resize-w" min="1" max="2048" value="32" /></label>
+          <label>H <input type="number" id="resize-h" min="1" max="2048" value="32" /></label>
+          <label class="check"><input type="checkbox" id="resize-keep-aspect" checked /> Lock aspect</label>
+        </span>
+        <span id="resize-pixel-fields" class="hidden" title="Size of one resized pixel, measured in current pixels">
+          <label>Pixel W <input type="number" id="resize-px-w" min="1" max="2048" value="5" /></label>
+          <label>Pixel H <input type="number" id="resize-px-h" min="1" max="2048" value="5" /></label>
+          <label class="check"><input type="checkbox" id="resize-px-keep-aspect" checked /> Lock aspect</label>
+        </span>
         <label>Shift X <input type="number" id="resize-shift-x" value="0" /></label>
         <label>Shift Y <input type="number" id="resize-shift-y" value="0" /></label>
         <button id="btn-resize-apply" title="Commit the resize (collapses the panel). Press Esc or click the header to cancel.">Apply</button>
@@ -105,9 +127,9 @@
 
   <section id="quant-panel">
     <header id="quant-header">
-      <button id="btn-quant-toggle" type="button" class="quant-toggle" aria-expanded="false" title="Show / hide the Color Quantization panel">
+      <button id="btn-quant-toggle" type="button" class="panel-toggle quant-toggle" aria-expanded="false" title="Show / hide the Color Quantization panel (Q)">
         <span class="caret">▶</span>
-        <span class="quant-title">Color Quantization</span>
+        <span class="quant-title">Color <b>Q</b>uantization</span>
       </button>
       <span id="quant-summary"></span>
     </header>
@@ -199,7 +221,6 @@
           <label>Width  <input type="number" id="import-w" min="1" max="2048" /></label>
           <label>Height <input type="number" id="import-h" min="1" max="2048" /></label>
           <label class="check"><input type="checkbox" id="import-keep-aspect" checked /> Lock aspect</label>
-          <label class="check"><input type="checkbox" id="import-extract-palette" checked /> Extract palette from image</label>
           <p class="hint">The grid shows how source pixels map to output pixels.</p>
         </div>
       </div>
@@ -210,6 +231,12 @@
     </form>
   </dialog>
 
-  <script src="app.js"></script>
+  <script>
+    // Cache-bust the main script during local development so a stale copy
+    // in the browser's HTTP cache doesn't shadow recent edits. The static
+    // server emits no cache headers, so without this the browser may keep
+    // serving an older app.js indefinitely after a normal reload.
+    document.write('<script src="app.js?_t=' + Date.now() + '"><\/script>');
+  </script>
 </body>
 </html>
