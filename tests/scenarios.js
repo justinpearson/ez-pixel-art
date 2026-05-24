@@ -2119,5 +2119,176 @@
       ],
     },
 
+
+    // ===== SVG export =====
+
+    {
+      label: '113-svg-format-option-exists',
+      description: 'SVG appears as an option in the #save-format selector alongside PNG/JPG/BMP.',
+      run: async () => {},
+      assertions: (app) => {
+        const opts = app.qa('#save-format option').map(o => o.value);
+        return [
+          ['svg option present',  opts.includes('svg'),                                  true],
+          ['svg option label',    app.q('#save-format option[value="svg"]').textContent, 'SVG'],
+        ];
+      },
+    },
+
+    {
+      label: '114-svg-export-basic',
+      description: 'Saving as SVG produces an image/svg+xml blob whose root <svg> matches the canvas dimensions and has the xmlns + crispEdges attributes that make the file render correctly when opened standalone.',
+      run: async (app) => {
+        app.click(5, 7);                                  // one ORANGE pixel
+        const blob = await app.captureSave('svg');
+        const text = await blob.text();
+        return { type: blob.type, text };
+      },
+      assertions: (_app, ctx) => [
+        ['blob type is image/svg+xml',         ctx.type.startsWith('image/svg+xml'),                  true],
+        ['root <svg> with xmlns',              /<svg[^>]*xmlns="http:\/\/www\.w3\.org\/2000\/svg"/.test(ctx.text), true],
+        ['root <svg> with width=32',           /<svg[^>]*\bwidth="32"/.test(ctx.text),                true],
+        ['root <svg> with height=32',          /<svg[^>]*\bheight="32"/.test(ctx.text),               true],
+        ['shape-rendering=crispEdges',         /shape-rendering="crispEdges"/.test(ctx.text),         true],
+      ],
+    },
+
+    {
+      label: '115-svg-rect-per-pixel',
+      description: 'Each non-transparent pixel emits exactly one 1×1 <rect>; painted pixel at (5,7) shows up as <rect x="5" y="7" width="1" height="1" .../>.',
+      run: async (app) => {
+        app.click(5, 7);                                  // one ORANGE pixel
+        const blob = await app.captureSave('svg');
+        const text = await blob.text();
+        const rectCount = (text.match(/<rect\b/g) || []).length;
+        return { text, rectCount };
+      },
+      assertions: (_app, ctx) => [
+        ['exactly one rect',                         ctx.rectCount,                                                              1],
+        ['rect at x=5 y=7 width=1 height=1',         /<rect[^>]*\bx="5"[^>]*\by="7"[^>]*\bwidth="1"[^>]*\bheight="1"/.test(ctx.text), true],
+        ['rect uses #cb6e4a fill',                   /fill="#cb6e4a"/i.test(ctx.text),                                            true],
+      ],
+    },
+
+    {
+      label: '116-svg-skips-transparent-pixels',
+      description: 'α=0 pixels emit no <rect> at all — a freshly cleared 32×32 canvas produces zero rects; one painted pixel produces exactly one.',
+      run: async (app) => {
+        const blankBlob = await app.captureSave('svg');
+        const blankText = await blankBlob.text();
+        const blankRects = (blankText.match(/<rect\b/g) || []).length;
+        app.click(10, 10);
+        const oneBlob = await app.captureSave('svg');
+        const oneText = await oneBlob.text();
+        const oneRects = (oneText.match(/<rect\b/g) || []).length;
+        return { blankRects, oneRects };
+      },
+      assertions: (_app, ctx) => [
+        ['blank canvas → 0 rects',  ctx.blankRects,  0],
+        ['1 painted pixel → 1 rect', ctx.oneRects,   1],
+      ],
+    },
+
+    {
+      label: '117-svg-translucent-uses-fill-opacity',
+      description: 'A translucent pixel (α=128) emits a <rect> with fill-opacity ≈ 0.5; fully-opaque pixels emit no fill-opacity attribute (compactness).',
+      run: async (app) => {
+        app.click(0, 0);                                  // opaque ORANGE
+        app.setAlpha(128);
+        app.click(5, 5);                                  // translucent ORANGE
+        const blob = await app.captureSave('svg');
+        const text = await blob.text();
+        // Walk each rect to inspect its attributes individually.
+        const rects = text.match(/<rect\b[^>]*\/>/g) || [];
+        const opaqueRect      = rects.find(r => r.includes(' x="0" ') && r.includes(' y="0" '));
+        const translucentRect = rects.find(r => r.includes(' x="5" ') && r.includes(' y="5" '));
+        return { opaqueRect, translucentRect };
+      },
+      assertions: (_app, ctx) => [
+        ['opaque rect has no fill-opacity',          /fill-opacity/.test(ctx.opaqueRect || ''),    false],
+        ['translucent rect has fill-opacity ≈ 0.5',  /fill-opacity="0\.50/.test(ctx.translucentRect || ''), true],
+      ],
+    },
+
+    {
+      label: '119-svg-horizontal-run-merged',
+      description: 'Five consecutive same-colour pixels in a row (3..7, 1) become ONE <rect width="5" height="1"> via horizontal run-length merging.',
+      run: async (app) => {
+        for (let x = 3; x <= 7; x++) app.click(x, 1);
+        const blob = await app.captureSave('svg');
+        const text = await blob.text();
+        const rectCount = (text.match(/<rect\b/g) || []).length;
+        return { text, rectCount };
+      },
+      assertions: (_app, ctx) => [
+        ['exactly one rect for the run', ctx.rectCount, 1],
+        ['rect at x=3 y=1 width=5 height=1',
+         /<rect[^>]*\bx="3"[^>]*\by="1"[^>]*\bwidth="5"[^>]*\bheight="1"/.test(ctx.text), true],
+      ],
+    },
+
+    {
+      label: '120-svg-vertical-run-merged-when-it-wins',
+      description: 'A 1×5 vertical column at (3, 1..5): horizontal RLE would emit 5 separate width=1 rects (one per row) while vertical RLE emits ONE width=1 height=5 rect. encodeSVG keeps whichever produces fewer rects, so the vertical encoding wins.',
+      run: async (app) => {
+        for (let y = 1; y <= 5; y++) app.click(3, y);
+        const blob = await app.captureSave('svg');
+        const text = await blob.text();
+        const rectCount = (text.match(/<rect\b/g) || []).length;
+        return { text, rectCount };
+      },
+      assertions: (_app, ctx) => [
+        ['exactly one rect for the column', ctx.rectCount, 1],
+        ['rect at x=3 y=1 width=1 height=5',
+         /<rect[^>]*\bx="3"[^>]*\by="1"[^>]*\bwidth="1"[^>]*\bheight="5"/.test(ctx.text), true],
+      ],
+    },
+
+    {
+      label: '121-svg-transparent-gap-breaks-runs',
+      description: 'A transparent pixel inside an otherwise-uniform horizontal run breaks the run into two rects in both directions, so the chosen encoding still has 2 rects.',
+      run: async (app) => {
+        for (let x = 0; x <= 4; x++) app.click(x, 0);     // ORANGE 0..4
+        // Punch a transparent hole at x=2.
+        app.pressErase();
+        app.click(2, 0);
+        const blob = await app.captureSave('svg');
+        const text = await blob.text();
+        const rectCount = (text.match(/<rect\b/g) || []).length;
+        return { rectCount, text };
+      },
+      assertions: (_app, ctx) => [
+        ['gap split → exactly 2 rects', ctx.rectCount, 2],
+      ],
+    },
+
+    {
+      label: '118-svg-keyboard-v-saves-svg',
+      description: 'When the save-format selector is set to SVG, the V keyboard shortcut also produces an SVG blob (regression: keyboard path uses #save-format like the button).',
+      run: async (app) => {
+        app.click(1, 1);
+        const sel = app.q('#save-format');
+        sel.value = 'svg';
+        // Intercept like captureSave but trigger via V keypress.
+        let captured = null;
+        const origCreate = app.win.URL.createObjectURL;
+        const origRevoke = app.win.URL.revokeObjectURL;
+        const origClick  = app.win.HTMLAnchorElement.prototype.click;
+        app.win.URL.createObjectURL = (b) => { captured = b; return 'blob:stub'; };
+        app.win.URL.revokeObjectURL = () => {};
+        app.win.HTMLAnchorElement.prototype.click = function () {};
+        try { app.keyboard('v'); }
+        finally {
+          app.win.URL.createObjectURL = origCreate;
+          app.win.URL.revokeObjectURL = origRevoke;
+          app.win.HTMLAnchorElement.prototype.click = origClick;
+        }
+        return { type: captured && captured.type };
+      },
+      assertions: (_app, ctx) => [
+        ['v produced an svg blob',  ctx.type && ctx.type.startsWith('image/svg+xml'), true],
+      ],
+    },
+
   ];
 })();

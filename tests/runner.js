@@ -134,6 +134,34 @@
       if (cb.checked !== !!on) cb.click();
     }
     pressQuantize() { this.q('#btn-quantize').click(); }
+    // Captures the Blob that the Save button would have downloaded, without
+    // actually triggering a browser download. Stubs URL.createObjectURL (which
+    // saveImage() calls with the blob) and HTMLAnchorElement.click so the
+    // synthetic anchor is a no-op. Synchronous encoders (BMP, SVG) capture
+    // immediately; async encoders (PNG/JPG via canvas.toBlob) are awaited.
+    async captureSave(format) {
+      let captured = null;
+      let resolve;
+      const done = new Promise(r => { resolve = r; });
+      const origCreate = this.win.URL.createObjectURL;
+      const origRevoke = this.win.URL.revokeObjectURL;
+      const origClick  = this.win.HTMLAnchorElement.prototype.click;
+      this.win.URL.createObjectURL = (blob) => { captured = blob; resolve(); return 'blob:stub'; };
+      this.win.URL.revokeObjectURL = () => {};
+      this.win.HTMLAnchorElement.prototype.click = function () {};
+      try {
+        const sel = this.q('#save-format');
+        sel.value = format;
+        this.q('#btn-save').click();
+        await Promise.race([done, new Promise(r => setTimeout(r, 2000))]);
+      } finally {
+        this.win.URL.createObjectURL = origCreate;
+        this.win.URL.revokeObjectURL = origRevoke;
+        this.win.HTMLAnchorElement.prototype.click = origClick;
+      }
+      if (!captured) throw new Error('save did not produce a blob for format ' + format);
+      return captured;
+    }
     keyboard(key) {
       this.doc.body.dispatchEvent(new this.win.KeyboardEvent('keydown', {
         key, bubbles: true,
