@@ -2290,5 +2290,174 @@
       ],
     },
 
+
+    // ===== SCAD (OpenSCAD) export =====
+
+    {
+      label: '122-scad-format-option-exists',
+      description: 'SCAD appears as an option in the #save-format selector alongside PNG/JPG/BMP/SVG.',
+      run: async () => {},
+      assertions: (app) => {
+        const opts = app.qa('#save-format option').map(o => o.value);
+        return [
+          ['scad option present',  opts.includes('scad'),                                  true],
+          ['scad option label',    app.q('#save-format option[value="scad"]').textContent, 'SCAD'],
+        ];
+      },
+    },
+
+    {
+      label: '123-scad-depth-input-visibility',
+      description: 'A #scad-depth input + explanatory text are hidden by default and become visible only when the save format is set to SCAD.',
+      run: async (app) => {
+        const sel = app.q('#save-format');
+        sel.value = 'png';
+        sel.dispatchEvent(new app.win.Event('change', { bubbles: true }));
+        const hiddenForPng = app.q('#scad-options').classList.contains('hidden');
+        sel.value = 'scad';
+        sel.dispatchEvent(new app.win.Event('change', { bubbles: true }));
+        const visibleForScad = !app.q('#scad-options').classList.contains('hidden');
+        const hasDepthInput  = !!app.q('#scad-depth');
+        const hasInfoText    = !!app.q('#scad-info');
+        // Restore default
+        sel.value = 'png';
+        sel.dispatchEvent(new app.win.Event('change', { bubbles: true }));
+        return { hiddenForPng, visibleForScad, hasDepthInput, hasInfoText };
+      },
+      assertions: (_app, ctx) => [
+        ['scad-options hidden when format=png',   ctx.hiddenForPng,    true],
+        ['scad-options visible when format=scad', ctx.visibleForScad,  true],
+        ['#scad-depth input exists',              ctx.hasDepthInput,   true],
+        ['#scad-info explanatory text exists',    ctx.hasInfoText,     true],
+      ],
+    },
+
+    {
+      label: '124-scad-export-basic',
+      description: 'Saving as SCAD produces a text/plain blob whose body declares pixel_size, max_height, the px module definition, and a header comment listing the source image dimensions.',
+      run: async (app) => {
+        app.click(5, 7);                                  // one ORANGE pixel
+        const blob = await app.captureSave('scad');
+        const text = await blob.text();
+        return { type: blob.type, text };
+      },
+      assertions: (_app, ctx) => [
+        ['blob type is text/plain',     ctx.type.startsWith('text/plain'),         true],
+        ['header lists 32x32 source',   /32\s*x\s*32/.test(ctx.text),              true],
+        ['declares pixel_size',         /pixel_size\s*=\s*1\b/.test(ctx.text),     true],
+        ['declares max_height',         /max_height\s*=\s*5\b/.test(ctx.text),     true],
+        ['defines module px',           /module\s+px\s*\(/.test(ctx.text),         true],
+        ['module uses cube()',          /cube\s*\(/.test(ctx.text),                true],
+      ],
+    },
+
+    {
+      label: '125-scad-call-per-pixel',
+      description: 'A single painted opaque pixel emits exactly one px(...) call; transparent pixels emit none. Y is flipped so image (5, 7) on a 32-tall canvas becomes SCAD y = 24.',
+      run: async (app) => {
+        app.click(5, 7);                                  // one ORANGE pixel, α=255
+        const blob = await app.captureSave('scad');
+        const text = await blob.text();
+        const callCount = (text.match(/^\s*px\s*\(/gm) || []).length;
+        const onlyCall  = (text.match(/^\s*px\s*\([^)]*\)\s*;/gm) || [])[0] || '';
+        return { callCount, onlyCall };
+      },
+      assertions: (_app, ctx) => [
+        ['exactly one px() call',                   ctx.callCount,                                          1],
+        ['x=5, y=24 (Y flipped), w=1, h=1, a=255',  /px\(\s*5\s*,\s*24\s*,\s*1\s*,\s*1\s*,\s*255\s*\)/.test(ctx.onlyCall), true],
+      ],
+    },
+
+    {
+      label: '126-scad-skips-transparent-pixels',
+      description: 'α=0 pixels emit no px() calls — a blank canvas produces zero calls; one painted pixel produces exactly one.',
+      run: async (app) => {
+        const blankBlob = await app.captureSave('scad');
+        const blankText = await blankBlob.text();
+        const blankCalls = (blankText.match(/^\s*px\s*\(/gm) || []).length;
+        app.click(10, 10);
+        const oneBlob = await app.captureSave('scad');
+        const oneText = await oneBlob.text();
+        const oneCalls = (oneText.match(/^\s*px\s*\(/gm) || []).length;
+        return { blankCalls, oneCalls };
+      },
+      assertions: (_app, ctx) => [
+        ['blank canvas → 0 px() calls',  ctx.blankCalls,  0],
+        ['1 painted pixel → 1 px() call', ctx.oneCalls,   1],
+      ],
+    },
+
+    {
+      label: '127-scad-horizontal-run-merged',
+      description: 'Five consecutive same-alpha pixels in a row become ONE px() call with width=5 via horizontal run-length merging on the alpha channel.',
+      run: async (app) => {
+        for (let x = 3; x <= 7; x++) app.click(x, 1);     // ORANGE α=255 run on image row 1
+        const blob = await app.captureSave('scad');
+        const text = await blob.text();
+        const callCount = (text.match(/^\s*px\s*\(/gm) || []).length;
+        return { text, callCount };
+      },
+      assertions: (_app, ctx) => [
+        ['exactly one px() for the run',           ctx.callCount, 1],
+        ['call is px(3, 30, 5, 1, 255)',           /px\(\s*3\s*,\s*30\s*,\s*5\s*,\s*1\s*,\s*255\s*\)/.test(ctx.text), true],
+      ],
+    },
+
+    {
+      label: '128-scad-vertical-run-merged-when-it-wins',
+      description: 'A 1×5 vertical column: horizontal RLE would emit 5 separate calls (one per row) while vertical RLE emits ONE call with height=5. encodeSCAD keeps whichever produces fewer calls, so the vertical encoding wins.',
+      run: async (app) => {
+        for (let y = 1; y <= 5; y++) app.click(3, y);     // vertical line x=3
+        const blob = await app.captureSave('scad');
+        const text = await blob.text();
+        const callCount = (text.match(/^\s*px\s*\(/gm) || []).length;
+        return { text, callCount };
+      },
+      assertions: (_app, ctx) => [
+        ['exactly one px() for the column',  ctx.callCount, 1],
+        // Image y=1..5 on a 32-tall canvas → SCAD y = 32-1-5 = 26 with h=5.
+        ['call is px(3, 26, 1, 5, 255)',     /px\(\s*3\s*,\s*26\s*,\s*1\s*,\s*5\s*,\s*255\s*\)/.test(ctx.text), true],
+      ],
+    },
+
+    {
+      label: '129-scad-different-alphas-do-not-merge',
+      description: 'Adjacent pixels with different alphas are NOT merged into one cube — each gets its own px() call (the heights differ, so the geometry differs).',
+      run: async (app) => {
+        app.click(0, 0);                                  // α=255
+        app.setAlpha(128);
+        app.click(1, 0);                                  // α=128
+        const blob = await app.captureSave('scad');
+        const text = await blob.text();
+        const callCount = (text.match(/^\s*px\s*\(/gm) || []).length;
+        return { text, callCount };
+      },
+      assertions: (_app, ctx) => [
+        ['two px() calls (one per alpha)',  ctx.callCount,                                                  2],
+        ['α=255 call present',              /px\(\s*0\s*,\s*31\s*,\s*1\s*,\s*1\s*,\s*255\s*\)/.test(ctx.text), true],
+        ['α=128 call present',              /px\(\s*1\s*,\s*31\s*,\s*1\s*,\s*1\s*,\s*128\s*\)/.test(ctx.text), true],
+      ],
+    },
+
+    {
+      label: '130-scad-depth-value-flows-into-output',
+      description: 'Editing #scad-depth changes the max_height constant in the generated SCAD body (the actual unit depth a user model uses).',
+      run: async (app) => {
+        app.click(0, 0);
+        const sel = app.q('#save-format');
+        sel.value = 'scad';
+        sel.dispatchEvent(new app.win.Event('change', { bubbles: true }));
+        const depth = app.q('#scad-depth');
+        depth.value = '12';
+        depth.dispatchEvent(new app.win.Event('input', { bubbles: true }));
+        const blob = await app.captureSave('scad');
+        const text = await blob.text();
+        return { text };
+      },
+      assertions: (_app, ctx) => [
+        ['max_height reflects user depth=12',  /max_height\s*=\s*12\b/.test(ctx.text), true],
+      ],
+    },
+
   ];
 })();
