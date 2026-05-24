@@ -514,6 +514,11 @@
       downloadBlob(encodeBMP24(id), 'ez-pixel-art.bmp');
       return;
     }
+    if (format === 'svg') {
+      const id = artCtx.getImageData(0, 0, imgW, imgH);
+      downloadBlob(encodeSVG(id), 'ez-pixel-art.svg');
+      return;
+    }
     if (format === 'jpg') {
       const tmp = document.createElement('canvas');
       tmp.width = imgW; tmp.height = imgH;
@@ -559,6 +564,74 @@
       }
     }
     return new Blob([buf], { type: 'image/bmp' });
+  }
+
+  // SVG encoder. For each non-transparent pixel we'd otherwise emit a 1×1
+  // <rect>; instead we coalesce consecutive same-RGBA pixels into wider /
+  // taller rects via run-length encoding. We run the pass in BOTH directions
+  // (rows L→R, then columns T→B) and ship whichever yielded fewer rects, so
+  // images dominated by vertical features (1-px columns, tall thin shapes)
+  // shrink as much as row-dominated ones. shape-rendering=crispEdges keeps
+  // the rects from getting anti-aliased when the file is rendered.
+  function svgRunsHorizontal(d, w, h) {
+    const out = [];
+    for (let y = 0; y < h; y++) {
+      let x = 0;
+      while (x < w) {
+        const i = (y * w + x) * 4;
+        const a = d[i + 3];
+        if (a === 0) { x++; continue; }
+        const r = d[i], g = d[i + 1], b = d[i + 2];
+        let end = x + 1;
+        while (end < w) {
+          const j = (y * w + end) * 4;
+          if (d[j] !== r || d[j + 1] !== g || d[j + 2] !== b || d[j + 3] !== a) break;
+          end++;
+        }
+        out.push([x, y, end - x, 1, r, g, b, a]);
+        x = end;
+      }
+    }
+    return out;
+  }
+  function svgRunsVertical(d, w, h) {
+    const out = [];
+    for (let x = 0; x < w; x++) {
+      let y = 0;
+      while (y < h) {
+        const i = (y * w + x) * 4;
+        const a = d[i + 3];
+        if (a === 0) { y++; continue; }
+        const r = d[i], g = d[i + 1], b = d[i + 2];
+        let end = y + 1;
+        while (end < h) {
+          const j = (end * w + x) * 4;
+          if (d[j] !== r || d[j + 1] !== g || d[j + 2] !== b || d[j + 3] !== a) break;
+          end++;
+        }
+        out.push([x, y, 1, end - y, r, g, b, a]);
+        y = end;
+      }
+    }
+    return out;
+  }
+  function encodeSVG(imageData) {
+    const w = imageData.width, h = imageData.height;
+    const d = imageData.data;
+    const hRects = svgRunsHorizontal(d, w, h);
+    const vRects = svgRunsVertical(d, w, h);
+    const rects = vRects.length < hRects.length ? vRects : hRects;
+    const hex2 = (n) => n.toString(16).padStart(2, '0');
+    const parts = [
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" shape-rendering="crispEdges">`,
+    ];
+    for (const [x, y, rw, rh, r, g, b, a] of rects) {
+      const fill = `#${hex2(r)}${hex2(g)}${hex2(b)}`;
+      const opacityAttr = a === 255 ? '' : ` fill-opacity="${(a / 255).toFixed(3)}"`;
+      parts.push(`<rect x="${x}" y="${y}" width="${rw}" height="${rh}" fill="${fill}"${opacityAttr}/>`);
+    }
+    parts.push('</svg>');
+    return new Blob([parts.join('')], { type: 'image/svg+xml' });
   }
 
   // ---------- Open / import ----------
