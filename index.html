@@ -20,7 +20,12 @@
         <option value="jpg">JPG</option>
         <option value="bmp">BMP</option>
         <option value="svg">SVG</option>
+        <option value="scad">SCAD</option>
       </select>
+      <span id="scad-options" class="hidden">
+        <label>Depth <input type="number" id="scad-depth" min="1" step="1" value="5" title="Maximum cube height (in OpenSCAD units, e.g. mm) for a fully-opaque pixel. Per-pixel height = (alpha / 255) × this value." /></label>
+        <span id="scad-info" class="hint">Alpha encodes depth: opaque pixels get the full Depth; α=0 pixels are omitted.</span>
+      </span>
     </div>
 
     <div class="group" id="select-tool-group">

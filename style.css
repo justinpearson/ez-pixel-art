@@ -429,6 +429,10 @@ main { flex: 1; min-height: 0; }
 }
 .hidden { display: none !important; }
 
+#scad-options { display: inline-flex; align-items: center; gap: 6px; }
+#scad-depth { width: 56px; padding: 2px 4px; font: inherit; }
+#scad-info { color: #777; font-size: 12px; }
+
 /* ---------- Dialogs ---------- */
 dialog {
   border: 1px solid #888;

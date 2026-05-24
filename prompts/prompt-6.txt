@@ -1,0 +1,41 @@
+Now that we have "export to SVG", let's also add an export format for the .scad 3d modeling file type. this is similar to .svg, in that the file format uses graphical primitives. But of course there's a 3rd dimension, the depth. I was thinking we could use the image's alpha channel to encode each pixel's depth -- 90% opacity means that pixel's depth is 90% of some "total depth" that the user must specify. Maybe if the "file format selector" (png, bmp, etc) is set to SVG, it shows an additional "depth" input field (in pixels), an additional info text explaining how the alpha channel is related to depth.
+
+Here's an example of what the final .SCAD file might look (note that the code below doesn't have run-length simplification):
+
+
+```
+// Generated from /Users/justin/Downloads/ez-pixel-art (3).png
+// Source image: 16 x 10 px
+// 1 image-pixel = 1 unit (mm) in X and Y
+// Height = (alpha / 255) * 5.0; alpha==0 pixels are omitted
+
+pixel_size = 1;
+max_height = 5.0;
+
+module px(x, y, a) {
+    translate([x * pixel_size, y * pixel_size, 0])
+        cube([pixel_size, pixel_size, (a / 255) * max_height]);
+}
+
+px(2, 9, 252);
+px(3, 9, 252);
+px(4, 9, 252);
+px(5, 9, 252);
+px(6, 9, 252);
+px(7, 9, 252);
+px(8, 9, 252);
+px(9, 9, 252);
+px(10, 9, 252);
+px(11, 9, 252);
+px(12, 9, 252);
+px(13, 9, 252);
+px(2, 8, 252);
+px(3, 8, 252);
+px(4, 8, 252);
+px(5, 8, 252);
+px(6, 8, 252);
+...
+```
+
+It might be nice to do a similar run-length compression to rects, like we did for svg.
+
